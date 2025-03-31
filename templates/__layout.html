@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>claimtracker2</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Roboto:ital,wght@0,100..900;1,100..900&display=swap');
+        html, body {
+            height: 100%;
+            margin: 0;
+        }
+
+        .container {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            overflow: hidden;
+        }
+
+        .content {
+            display: flex;
+            flex: 1;
+        }
+
+        .sidebar {
+            width: 200px; /* Adjust as needed */
+        }
+
+        .main {
+            flex: 1;
+        }
+
+        #header {
+            background-color: hsl(203deg 100% 32%);
+            color: white;
+            padding: 0px;
+            margin: 0px;
+            display: flex;
+            align-items: center;
+        }
+
+        /* Style the dropdown */
+        #table_select {
+            background-color: hsl(203deg 100% 32%); 
+            color: white;
+            border: none;
+            margin: auto;
+            padding: 15px; 
+            font-family: "Roboto", sans-serif;
+            font-size: 18px;
+
+        }
+
+        th {
+            cursor: pointer; /* Make headers clickable */
+            position: relative; /* Needed for positioning the arrow */
+            padding-right: 20px; /* Add some space for the arrow */
+        }
+
+        th::after {
+            content: "";
+            position: absolute;
+            right: 5px;
+            top: 50%;
+            transform: translateY(-50%);
+            border-left: 5px solid transparent;
+            border-right: 5px solid transparent;
+            border-bottom: 5px solid black; /* Default: sorted ascending */
+        }
+
+        th.sorted-asc::after {
+            border-top: 5px solid black; /* Change arrow direction for descending */
+            border-bottom: 5px solid transparent;
+        }
+    </style>
+    <script>
+        function sortTable(n) {
+            let table, rows, switching, i, x, y, shouldSwitch, dir, switchcount = 0;
+            table = document.getElementsByTagName("table")[0];
+            switching = true;
+            // Set the sorting direction to ascending:
+            dir = "asc"; 
+
+            while (switching) {
+                switching = false;
+                rows = table.rows;
+                for (i = 1; i < (rows.length - 1); i++) {
+                    shouldSwitch = false;
+                    x = rows[i].getElementsByTagName("TD")[n];
+                    y = rows[i + 1].getElementsByTagName("TD")[n];
+
+                    if (dir == "asc") {
+                        if (x.innerHTML.toLowerCase() > y.innerHTML.toLowerCase()) {
+                            shouldSwitch= true;
+                            break;
+                        }
+                    } else if (dir == "desc") {
+                        if (x.innerHTML.toLowerCase() < y.innerHTML.toLowerCase()) {
+                            shouldSwitch = true;
+                            break;
+                        }
+                    }
+                }
+                if (shouldSwitch) {
+                    rows[i].parentNode.insertBefore(rows[i + 1], rows[i]);
+                    switching = true;
+
+                    switchcount ++;      
+                } else {
+                    if (switchcount == 0 && dir == "asc") {
+                        dir = "desc";
+                        switching = true;
+                    }
+                }
+            }
+            // Add/remove sorted class and change arrow direction
+            let header = table.rows[0].getElementsByTagName("TH")[n];
+            if (dir == "asc") {
+                header.classList.add("sorted-asc");
+                header.classList.remove("sorted-desc"); // Remove the other class if present
+            } else {
+                header.classList.add("sorted-desc");
+                header.classList.remove("sorted-asc"); // Remove the other class if present
+            }
+
+            // Remove sorting indicator from other columns (optional but recommended)
+            let headers = table.rows[0].getElementsByTagName("TH");
+            for (let i = 0; i < headers.length; i++) {
+                if (i !== n) {
+                    headers[i].classList.remove("sorted-asc", "sorted-desc");
+                }
+            }
+        }
+    </script>
+</head>
+<body>
+    <div class="container">
+        <div id="header">
+            <form method="POST" style="margin-right: auto;">
+                <img src="/static/icon.png" style="height: 32px; width: auto; margin-top: 10px; margin-bottom: -10px; margin-left: 10px"/>
+                <select name="table_select" id="table_select" onchange="this.form.submit()">
+                    {% for table in tables %}
+                        <option value="{{ table }}" {% if selected_table == table %}selected{% endif %}>{{ table }}</option>
+                    {% endfor %}
+                </select>
+            </form>
+        </div>
+    <div id="content" class="content">
+        {% if selected_url %}
+            <iframe src="{{ selected_url }}" style="width: 100%; height: 100%; overflow: auto;"></iframe>
+        {% endif %}
+    </body>
+</html>
