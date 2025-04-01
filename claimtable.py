@@ -60,6 +60,7 @@ class ClaimTable(pygsheets.Spreadsheet):
         self.conn = conn
         self.suffix = suffix
         self.sheet1.title = self.title
+        self.compact_wks = None # compacted worksheet placeholder
         self.supported_jurisdictions = {"YK": arcweb_data.get_data_YK, "NWT": arcweb_data.get_data_NWT, \
                                         "NU": arcweb_data.get_data_NU, "NV": arcweb_data.get_data_NV, \
                                         "BC": arcweb_data.get_data_BC}
@@ -67,8 +68,9 @@ class ClaimTable(pygsheets.Spreadsheet):
             self.load_config()
 
     def load_config(self):
+        df = pd.DataFrame()
         try:
-            query = "SELECT * FROM " + self.title + self.suffix["config"] # __cnfg
+            query = "SELECT * FROM " + self.title + self.suffix["config"]
             conn_lock.acquire()
             df = pd.read_sql(query, con=self.conn)
             conn_lock.release()
@@ -77,40 +79,70 @@ class ClaimTable(pygsheets.Spreadsheet):
             logging.critcal(e)
         # crontab-like schedule definitions for updating expiries and emailing the access_list
         now = datetime.now()
-        self.update_schedule = Cron(df["UpdateSched"].iloc[0]).schedule(now)
-        self.update_schedule_iter = self.update_schedule.next()
-        self.email_schedule = Cron(df["EmailSched"].iloc[0]).schedule(now)
-        self.email_schedule_iter = self.email_schedule.next()
-        # google sheet column order
-        column_order = df["ColumnOrder"].iloc[0]
-        self.column_order = column_order.split(";")
-        compact_order = df["CompactColumnOrder"].iloc[0]
-        self.compact_order = compact_order.split(";")
-        # pruning (remove expired claims) and compactions flags
-        self.prune = df["Prune"].iloc[0]
-        self.compact = df["Compact"].iloc[0]
-        # google sheet access list (emails)
-        access_list = df["AccessList"].iloc[0]
-        self.access_list = access_list.split(";")
-        for email in self.access_list:
-            self.share(email, role="reader", type="user")
+        # TODO: better exception handling
+        if df.size > 0:
+            try:
+                self.update_schedule = Cron(df["UpdateSched"].iloc[0]).schedule(now)
+                self.update_schedule_iter = self.update_schedule.next()
+                self.email_schedule = Cron(df["EmailSched"].iloc[0]).schedule(now)
+                self.email_schedule_iter = self.email_schedule.next()
+                # google sheet column order
+                column_order = df["ColumnOrder"].iloc[0]
+                self.column_order = column_order.split(";")
+                compact_order = df["CompactColumnOrder"].iloc[0]
+                self.compact_order = compact_order.split(";")
+                # pruning (remove expired claims) and compactions flags
+                self.prune = df["Prune"].iloc[0]
+                self.compact = df["Compact"].iloc[0]
+                # google sheet access list (emails)
+                access_list = df["AccessList"].iloc[0]
+                self.access_list = access_list.split(";")
+                for email in self.access_list:
+                   self.share(email, role="reader", type="user")
+            except:
+                logging.critical("Unable to read configuration parameters for <%s>", self.title)
+        else:
+            # TODO: default settings need to be handled better
+            self.update_schedule = Cron()
+            self.update_schedule_iter = None
+            self.email_schedule = Cron()
+            self.email_schedule.iter = None
+            self.access_list = []
+            self.column_order = TableDefinition().required_cols
+            self.compact_order = None # compaction will fail unless self.compact = 0
+            self.compact = 0
+            self.prune = 0
 
     def new(self):
+        df = pd.DataFrame()
         try:
             query = "DROP TABLE IF EXISTS " + self.title + ";" + \
-                        "CREATE TABLE " + self.title + " LIKE Parcels_Template;" + \
+                        "CREATE TABLE " + self.title + " LIKE _Parcels_Template;" + \
                         "ALTER TABLE " + self.title + " ADD INDEX NextDueDate (NextDueDate);" + \
                         "ALTER TABLE " + self.title + " ADD INDEX RegDate (RegDate);" + \
-                        "ALTER TABLE " + self.title + " ADD INDEX UpdateDate (UpdateDate)"
+                        "ALTER TABLE " + self.title + " ADD INDEX UpdateDate (UpdateDate);" + \
+                        "DROP TABLE IF EXISTS " + self.title + self.suffix["config"] + ";" + \
+                        "CREATE TABLE " + self.title + self.suffix["config"] + " LIKE _Config_Template"
             query = query.split(";")
             conn_lock.acquire()
             for q in query:
                 self.conn.execute(text(q))
+            query = "SELECT * FROM " + self.title
+            df = pd.read_sql(query, con=self.conn) # Put the columns into the dataframe
             conn_lock.release()
             self.sheet1.link()
         except exc.SQLAlchemyError as e:
             logging.critical("Unable to create new table <%s>", self.title)
             logging.critical(e)
+
+        self.load_config()
+
+        # re-order columns
+        df = df[self.column_order + [c for c in df.columns if c not in self.column_order]]
+        self.sheet1.set_dataframe(df, (1,1), encoding="utf-8", fit=True)
+#        self.sheet1.frozen_rows = 1
+        self.sheet1.link()
+
 
     def destroy(self):
         logging.debug("Destroying table <%s>", self.title)
@@ -183,11 +215,9 @@ class ClaimTable(pygsheets.Spreadsheet):
                                               row["RegTitleNumber"])
                                 self.conn.execute(text("DELETE FROM " + self.title + " WHERE RegTitleNumber=\"" + \
                                      row["RegTitleNumber"] + "\""))
-                                self.conn.commit()
                                 df = df.drop(index)
                     if not df.empty:
                         df.to_sql(self.title, self.conn, index=False, if_exists="append", method=mysql_replace_into)
-                        self.conn.commit()
                     conn_lock.release()
                     i = i + 1
 
@@ -215,6 +245,7 @@ class ClaimTable(pygsheets.Spreadsheet):
         for jurisdiction in self.supported_jurisdictions:
             self.update(TableDefinition(), jurisdiction)
 
+        df = pd.DataFrame()
         # load MySQL table into first worksheet
         try:
             query = "SELECT * FROM " + self.title
@@ -236,7 +267,8 @@ class ClaimTable(pygsheets.Spreadsheet):
     def compaction(self):
         if self.compact:
             logging.info("Performing tenure compaction on table <%s>", self.title)
-            self.compact = self.add_worksheet(self.title + self.suffix["compact"])
+            self.compact_wks = self.add_worksheet(self.title + self.suffix["compact"])
+            df = pd.DataFrame()
             with open("compaction_new.sql", "r") as file:
                 query = file.read()
                 query = query.replace("<!TableName>", self.title)
@@ -255,5 +287,5 @@ class ClaimTable(pygsheets.Spreadsheet):
             # drop and re-order google sheet
             df = df.drop(columns=["Area_ha", "TitleNumberDistance"])
             df = df[self.compact_order + [c for c in df.columns if c not in self.compact_order]]
-            self.compact.set_dataframe(df, (1,1), encoding="utf-8", fit=True)
-            self.compact.frozen_rows = 1
+            self.compact_wks.set_dataframe(df, (1,1), encoding="utf-8", fit=True)
+            self.compact_wks.frozen_rows = 1

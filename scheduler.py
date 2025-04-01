@@ -77,12 +77,16 @@ class Scheduler(threading.Thread):
                 # this could present a race condition - for now it's up to the user to not schedule everything at once
                 now = datetime.now()
                 for table in claimtables:
+                    if not table.update_schedule_iter:
+                        continue
                     if table.update_schedule_iter <= now:
                         logging.info("Launching scheduled updater for <%s>", str(table.title))
                         for jurisdiction in table.supported_jurisdictions:
                             table.update(TableDefinition(), jurisdiction)
                         table.compaction()
                         table.update_schedule_iter = table.update_schedule.next()
+                    if not table.email_schedule_iter:
+                        continue
                     if table.email_schedule_iter <= now:
                         logging.info("Launching scheduled emailer for <%s>", str(table.title))
                         # TODO: prepare body of the email (Feature Not Implemented)

@@ -23,7 +23,7 @@ import sqlalchemy
 from sqlalchemy import text, exc
 import pygsheets
 from claimtable import ClaimTable, claimtables, conn_lock
-from flask import Flask, render_template, request
+from flask import Flask, render_template, request, redirect, url_for
 from threading import Thread
 from scheduler import Scheduler
 
@@ -124,6 +124,11 @@ class Configuration(configparser.RawConfigParser):
 configuration = Configuration()
 configuration.validate()
 
+# shared among functions - initialize these later
+conn = None
+gc = None
+suffix = {}
+
 @app.route("/", methods=["GET", "POST"])
 def index():
     tables = {}
@@ -137,6 +142,19 @@ def index():
         selected_table = list(tables.keys())[0]
         selected_url = tables.get(selected_table)
     return render_template("__layout.html", tables=tables.keys(), selected_url=selected_url)
+
+@app.route("/new")
+def new():
+    # TODO: needs a dialog to rename from 'untitled'
+    sheet = gc.sheet.create("untitled")
+    c = ClaimTable(conn, suffix, gc, sheet, load_config=False)
+    c.new()
+    claimtables.append(c)
+    return redirect(url_for("index"))
+
+@app.route("/delete")
+def delete():
+    return redirect(url_for("index"))
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -167,9 +185,10 @@ if __name__ == "__main__":
         conn_lock.release()
         if  tables_raw is None:
             logging.info("No tables in database!")
-            # TODO: we have to exit here, because creating a new table requires Parcels_Template
+            # TODO: we have to exit here, because creating a new table requires _Parcels_Template
             pass
-        tables = [t[0] for t in tables_raw if t[0] != "Parcels_Template"] # 'Parcels_Template' is hardcoded, non-rw
+        # '_Parcels_Template' and '_Config_Template' are hard-coded, non-rw
+        tables = [t[0] for t in tables_raw if t[0] not in ("_Parcels_Template", "_Config_Template")]
         suffix = {
                 "config": configuration.get("Tables","config_suffix"),
                 "compact": configuration.get("Tables","compact_suffix")
@@ -192,10 +211,7 @@ if __name__ == "__main__":
     # If the table list is empty, create a new table called 'untitled'
     if not tables:
         logging.info("Empty database; new table: <untitled>")
-        sheet = gc.sheet.create("untitled")
-        c = Claimtable(conn, suffix, gc, sheet)
-        c.new()
-        claimtables.append(c)
+        new()
 
     # Load each table into its own ClaimTable object (inherited from the Spreadsheet class)
     # Server is a long-lived application so delete everything from Google Sheets and reload on each new instance

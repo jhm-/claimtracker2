@@ -36,6 +36,7 @@
             margin: 0px;
             display: flex;
             align-items: center;
+            justify-content: space-between;
         }
 
         /* Style the dropdown */
@@ -70,6 +71,22 @@
         th.sorted-asc::after {
             border-top: 5px solid black; /* Change arrow direction for descending */
             border-bottom: 5px solid transparent;
+        }
+
+        .header-links {
+            display: flex;
+            align-items: center;
+            margin-right: 10px;
+            font-family: "Roboto", sanf-serif;
+            font-size: 18px;
+        }
+
+        .header-links a {
+            color: white;
+            text-decoration: none;
+            margin-left: 10px;
+            margin-right: 10px;
+            padding: 10px;
         }
     </style>
     <script>
@@ -143,6 +160,9 @@
                     {% endfor %}
                 </select>
             </form>
+            <div class="header-links">
+                <a href="/new">New</a> | <a href="/delete">Delete</a>
+            </div>
         </div>
     <div id="content" class="content">
         {% if selected_url %}
