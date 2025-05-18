@@ -244,9 +244,9 @@ class ClaimTable(pygsheets.Spreadsheet):
 
     def load(self):
         """ Update expiry dates, load MySQL table into ClaimTable object, run compaction, link with cloud """
-        logging.info("Updating expiries for all parcels in <%s>", self.title)
-        for jurisdiction in self.supported_jurisdictions:
-            self.update(TableDefinition(), jurisdiction)
+#        logging.info("Updating expiries for all parcels in <%s>", self.title)
+ #       for jurisdiction in self.supported_jurisdictions:
+  #          self.update(TableDefinition(), jurisdiction)
 
         df = pd.DataFrame()
         # load MySQL table into first worksheet

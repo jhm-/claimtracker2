@@ -24,7 +24,7 @@ from sqlalchemy import text, exc
 import pygsheets
 from claimtable import ClaimTable, claimtables, conn_lock
 from flask import Flask, render_template, request, redirect, url_for, jsonify
-from flask_wtf.csrf import CSRFProtect
+from flask_wtf.csrf import CSRFProtect, generate_csrf
 from threading import Thread
 from scheduler import Scheduler
 
@@ -144,7 +144,7 @@ def index():
     else:
         selected_table = list(tables.keys())[0]
         selected_url = tables.get(selected_table)
-    return render_template("__layout2.html", tables=tables.keys(), selected_url=selected_url)
+    return render_template("__layout2.html", tables=tables.keys(), selected_url=selected_url, csrf_token=generate_csrf())
 
 @app.route("/new", methods=["GET", "POST"])
 def new():
