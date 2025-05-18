@@ -23,11 +23,14 @@ import sqlalchemy
 from sqlalchemy import text, exc
 import pygsheets
 from claimtable import ClaimTable, claimtables, conn_lock
-from flask import Flask, render_template, request, redirect, url_for
+from flask import Flask, render_template, request, redirect, url_for, jsonify
+from flask_wtf.csrf import CSRFProtect
 from threading import Thread
 from scheduler import Scheduler
 
 app = Flask(__name__)
+app.config["SECRET_KEY"] = "claimtracker"
+csrf = CSRFProtect(app)
 
 version = "0.0.1"
 config_path = "claimtracker.conf"
@@ -126,7 +129,7 @@ configuration.validate()
 
 # shared among functions - initialize these later
 conn = None
-gc = None
+#gc = None
 suffix = {}
 
 @app.route("/", methods=["GET", "POST"])
@@ -141,16 +144,26 @@ def index():
     else:
         selected_table = list(tables.keys())[0]
         selected_url = tables.get(selected_table)
-    return render_template("__layout.html", tables=tables.keys(), selected_url=selected_url)
+    return render_template("__layout2.html", tables=tables.keys(), selected_url=selected_url)
 
-@app.route("/new")
+@app.route("/new", methods=["GET", "POST"])
 def new():
+    data = request.get_json()
+    table_name = data.get("table_name")
+    if not table_name:
+        table_name = "untitled"
     # TODO: needs a dialog to rename from 'untitled'
-    sheet = gc.sheet.create("untitled")
-    c = ClaimTable(conn, suffix, gc, sheet, load_config=False)
-    c.new()
-    claimtables.append(c)
-    return redirect(url_for("index"))
+    logging.info("New table - connecting with google sheets")
+    try:
+        gc = pygsheets.authorize(service_file=configuration.get("Credentials","file"))
+        sheet = gc.sheet.create(table_name)
+        c = ClaimTable(conn, suffix, gc, sheet, load_config=False)
+        c.new()
+        claimtables.append(c)
+        return jsonify({"success": True, "table_name": table_name, "redirect_url": url_for("index")})
+    except Exception as e:
+        logging.error("Error creating table: %s", e)
+        return jsonify({"success": False, "error" : str(e)})
 
 @app.route("/delete")
 def delete():

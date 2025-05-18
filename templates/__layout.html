@@ -139,7 +139,7 @@
                 header.classList.remove("sorted-asc"); // Remove the other class if present
             }
 
-            // Remove sorting indicator from other columns (optional but recommended)
+            // Remove sorting indicator from other columns
             let headers = table.rows[0].getElementsByTagName("TH");
             for (let i = 0; i < headers.length; i++) {
                 if (i !== n) {
