@@ -130,11 +130,6 @@ class ClaimTable(pygsheets.Spreadsheet):
             query = "SELECT * FROM " + self.title
             df = pd.read_sql(query, con=self.conn) # Put the columns into the dataframe
             conn_lock.release()
-            # re-order columns
-            df = df[self.column_order + [c for c in df.columns if c not in self.column_order]]
-            self.sheet1.set_dataframe(df, (1,1), encoding="utf-8", fit=True)
-#            self.sheet1.frozen_rows = 1
-            self.sheet1.link()
         except exc.SQLAlchemyError as e:
             logging.critical("Unable to create new table <%s>", self.title)
             logging.critical(e)
@@ -144,8 +139,9 @@ class ClaimTable(pygsheets.Spreadsheet):
         # re-order columns
         df = df[self.column_order + [c for c in df.columns if c not in self.column_order]]
         self.sheet1.set_dataframe(df, (1,1), encoding="utf-8", fit=True)
-        self.sheet1.frozen_rows = 1
-#        self.sheet1.link()
+        # can't freeze rows when there's only one row
+        # self.sheet1.frozen_rows = 1
+        self.sheet1.link()
 
     def destroy(self):
         logging.debug("Destroying table <%s>", self.title)

@@ -170,157 +170,130 @@
         }
     </style>
     <script>
-        function sortTable(n) {
-            let table, rows, switching, i, x, y, shouldSwitch, dir, switchcount = 0;
-            table = document.getElementsByTagName("table")[0];
-            switching = true;
-            // Set the sorting direction to ascending:
-            dir = "asc";
-
-            while (switching) {
-                switching = false;
-                rows = table.rows;
-                for (i = 1; i < (rows.length - 1); i++) {
-                    shouldSwitch = false;
-                    x = rows[i].getElementsByTagName("TD")[n];
-                    y = rows[i + 1].getElementsByTagName("TD")[n];
-
-                    if (dir == "asc") {
-                        if (x.innerHTML.toLowerCase() > y.innerHTML.toLowerCase()) {
-                            shouldSwitch= true;
-                            break;
-                        }
-                    } else if (dir == "desc") {
-                        if (x.innerHTML.toLowerCase() < y.innerHTML.toLowerCase()) {
-                            shouldSwitch = true;
-                            break;
+        document.addEventListener('DOMContentLoaded', function() {
+            // Table sorting
+            function sortTable(n) {
+                let table, rows, switching, i, x, y, shouldSwitch, dir, switchcount = 0;
+                table = document.getElementsByTagName("table")[0];
+                switching = true;
+                dir = "asc";
+                while (switching) {
+                    switching = false;
+                    rows = table.rows;
+                    for (i = 1; i < (rows.length - 1); i++) {
+                        shouldSwitch = false;
+                        x = rows[i].getElementsByTagName("TD")[n];
+                        y = rows[i + 1].getElementsByTagName("TD")[n];
+                        if (dir == "asc") {
+                            if (x.innerHTML.toLowerCase() > y.innerHTML.toLowerCase()) {
+                                shouldSwitch= true;
+                                break;
+                            }
+                        } else if (dir == "desc") {
+                            if (x.innerHTML.toLowerCase() < y.innerHTML.toLowerCase()) {
+                                shouldSwitch = true;
+                                break;
+                            }
                         }
                     }
-                }
-                if (shouldSwitch) {
-                    rows[i].parentNode.insertBefore(rows[i + 1], rows[i]);
-                    switching = true;
-
-                    switchcount ++;
-                } else {
-                    if (switchcount == 0 && dir == "asc") {
-                        dir = "desc";
+                    if (shouldSwitch) {
+                        rows[i].parentNode.insertBefore(rows[i + 1], rows[i]);
                         switching = true;
-                    }
-                }
-            }
-            // Add/remove sorted class and change arrow direction
-            let header = table.rows[0].getElementsByTagName("TH")[n];
-            if (dir == "asc") {
-                header.classList.add("sorted-asc");
-                header.classList.remove("sorted-desc"); // Remove the other class if present
-            } else {
-                header.classList.add("sorted-desc");
-                header.classList.remove("sorted-asc"); // Remove the other class if present
-            }
-
-            // Remove sorting indicator from other columns
-            let headers = table.rows[0].getElementsByTagName("TH");
-            for (let i = 0; i < headers.length; i++) {
-                if (i !== n) {
-                    headers[i].classList.remove("sorted-asc", "sorted-desc");
-                }
-            }
-        }
-
-        // Get the modal
-        var modal = document.getElementById("newTableModal");
-
-        // Get the link that opens the modal
-        var newLink = document.querySelector('.header-links a[href="/new"]');
-
-        // Get the close button
-        var closeButton = document.querySelector(".close-button");
-
-        // Get the form inside the modal
-        var newTableForm = document.getElementById("newTableForm");
-
-        // Get the table select element
-        var tableSelect = document.getElementById("table_select");
-
-        // Get the loading indicator
-        var loadingIndicator = document.getElementById("loading-indicator");
-
-        // Function to show loading indicator
-        function showLoading() {
-            loadingIndicator.style.display = "block";
-        }
-
-        // Function to hide loading indicator
-        function hideLoading() {
-            loadingIndicator.style.display = "none";
-        }
-
-        // Event listener for the "New" link
-        newLink.addEventListener('click', function(event) {
-            event.preventDefault(); // Prevent the default link behavior
-            modal.style.display = "block";
-        });
-
-        // Event listener for the close button
-        closeButton.addEventListener('click', function() {
-            modal.style.display = "none";
-        });
-
-        // Close the modal if the user clicks outside of it
-        window.addEventListener('click', function(event) {
-            if (event.target == modal) {
-                modal.style.display = "none";
-            }
-        });
-
-        // Handle form submission using AJAX
-        newTableForm.addEventListener('submit', function(event) {
-            event.preventDefault(); // Prevent the default form submission
-            var tableNameInput = document.getElementById("table_name");
-            var tableName = tableNameInput.value;
-
-            if (tableName) {
-                showLoading();
-                fetch('/new', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRFToken': '{{ csrf_token }}'
-                    },
-                    body: JSON.stringify({ table_name: tableName })
-                })
-                .then(response => response.json())
-                .then(data => {
-                    hideLoading();
-                    if (data.success) {
-                        // Optionally, display a success message
-                        alert('Table "' + tableName + '" created successfully!');
-                        // Update the table dropdown
-                        var newOption = document.createElement("option");
-                        newOption.value = tableName;
-                        newOption.text = tableName;
-                        tableSelect.appendChild(newOption);
-                        tableSelect.value = tableName; // Select the new table
-                        // You might also want to update the iframe source or reload its content
-                        window.location.href = '/' + tableName; // Example: navigate to the new table view
-                        modal.style.display = "none";
+                        switchcount ++;
                     } else {
-                        // Display an error message
-                        alert('Error creating table: ' + data.error);
+                        if (switchcount == 0 && dir == "asc") {
+                            dir = "desc";
+                            switching = true;
+                        }
                     }
-                })
-                .catch(error => {
-                    hideLoading();
-                    console.error('Error creating table:', error);
-                    alert('An unexpected error occurred.');
+                }
+                let header = table.rows[0].getElementsByTagName("TH")[n];
+                if (dir == "asc") {
+                    header.classList.add("sorted-asc");
+                    header.classList.remove("sorted-desc");
+                } else {
+                    header.classList.add("sorted-desc");
+                    header.classList.remove("sorted-asc");
+                }
+                let headers = table.rows[0].getElementsByTagName("TH");
+                for (let i = 0; i < headers.length; i++) {
+                    if (i !== n) {
+                        headers[i].classList.remove("sorted-asc", "sorted-desc");
+                    }
+                }
+            }
+
+            // Modal and form logic
+            var modal = document.getElementById("newTableModal");
+            var newLink = document.querySelector('.header-links a[href="/new"]');
+            var closeButton = document.querySelector(".close-button");
+            var newTableForm = document.getElementById("newTableForm");
+            var tableSelect = document.getElementById("table_select");
+            var loadingIndicator = document.getElementById("loading-indicator");
+
+            function showLoading() { loadingIndicator.style.display = "block"; }
+            function hideLoading() { loadingIndicator.style.display = "none"; }
+
+            if (newLink) {
+                newLink.addEventListener('click', function(event) {
+                    event.preventDefault();
+                    modal.style.display = "block";
                 });
-            } else {
-                alert("Please enter a table name.");
+            }
+            if (closeButton) {
+                closeButton.addEventListener('click', function() {
+                    modal.style.display = "none";
+                });
+            }
+            window.addEventListener('click', function(event) {
+                if (event.target == modal) {
+                    modal.style.display = "none";
+                }
+            });
+            if (newTableForm) {
+                newTableForm.addEventListener('submit', function(event) {
+                    event.preventDefault();
+                    var tableNameInput = document.getElementById("table_name");
+                    var tableName = tableNameInput.value;
+                    if (tableName) {
+                        showLoading();
+                        fetch('/new', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-CSRFToken': '{{ csrf_token }}'
+                            },
+                            body: JSON.stringify({ table_name: tableName })
+                        })
+                        .then(response => response.json())
+                        .then(data => {
+                            hideLoading();
+                            if (data.success) {
+                                alert('Table "' + tableName + '" created successfully!');
+                                var newOption = document.createElement("option");
+                                newOption.value = tableName;
+                                newOption.text = tableName;
+                                tableSelect.appendChild(newOption);
+                                tableSelect.value = tableName;
+                                window.location.href = '/' + tableName;
+                                modal.style.display = "none";
+                            } else {
+                                alert('Error creating table: ' + data.error);
+                            }
+                        })
+                        .catch(error => {
+                            hideLoading();
+                            console.error('Error creating table:', error);
+                            alert('An unexpected error occurred.');
+                        });
+                    } else {
+                        alert("Please enter a table name.");
+                    }
+                });
             }
         });
     </script>
-</head>
+    </head>
 <body>
     <div class="container">
         <div id="header">
