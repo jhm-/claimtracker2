@@ -144,7 +144,7 @@ def index():
     else:
         selected_table = list(tables.keys())[0]
         selected_url = tables.get(selected_table)
-    return render_template("__layout2.html", tables=tables.keys(), selected_url=selected_url, csrf_token=generate_csrf())
+    return render_template("__layout.html", tables=tables.keys(), selected_url=selected_url, csrf_token=generate_csrf())
 
 @app.route("/new", methods=["GET", "POST"])
 def new():
