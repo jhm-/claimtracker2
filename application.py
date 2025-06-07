@@ -95,7 +95,7 @@ class Configuration(configparser.RawConfigParser):
                                 format="%(asctime)s %(levelname)-8s %(message)s", filemode="w")
         except:
             print("FATAL: Could not write to log\nMake sure <%s> is writable and try again" \
-                    % self.get("Logging", "filename"), file=sys.stderr)
+                  % self.get("Logging", "filename"), file=sys.stderr)
             exit()
         # Validate the database settings - how?
         # Validate the credential settings
@@ -133,18 +133,25 @@ conn = None
 suffix = {}
 
 @app.route("/", methods=["GET", "POST"])
-def index():
+@app.route("/<string:table_name>", methods=["GET", "POST"])
+def index(table_name=None):
     tables = {}
     selected_url = None
     for c in claimtables:
         tables[c.title] = c.sheet1.url
     if request.method == "POST":
         selected_table = request.form.get("table_select")
-        selected_url = tables.get(selected_table)
+        if selected_table:
+            selected_url = tables.get(selected_table)
+            return redirect(url_for("index", table_name=selected_table))
     else:
-        selected_table = list(tables.keys())[0]
+        if table_name and table_name in tables:
+            selected_table = table_name
+        elif tables:
+            selected_table = list(tables.keys())[0]
         selected_url = tables.get(selected_table)
-    return render_template("__layout.html", tables=tables.keys(), selected_url=selected_url, csrf_token=generate_csrf())
+    return render_template("__layout.html", tables=tables.keys(), selected_table=selected_table, \
+                           selected_url=selected_url, csrf_token=generate_csrf())
 
 @app.route("/new", methods=["GET", "POST"])
 def new():
