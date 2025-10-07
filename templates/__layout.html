@@ -231,14 +231,22 @@
 
             // Modal and form logic
             var modal = document.getElementById("newTableModal");
+            var deleteModal = document.getElementById("deleteTableModal");
             var newLink = document.querySelector('.header-links a[href="/new"]');
+            var deleteLink = document.querySelector('.header-links a[href="/delete"]');
             var closeButton = document.querySelector(".close-button");
+            var deleteConfirmButton = deleteModal.querySelector('button[type="submit"]');
+            var deleteCancelButton = deleteModal.querySelector('button.cancel-button');
+            var deleteCloseButton = deleteModal.querySelector('.close-button');
             var newTableForm = document.getElementById("newTableForm");
             var tableSelect = document.getElementById("table_select");
             var loadingIndicator = document.getElementById("loading-indicator");
 
             function showLoading() { loadingIndicator.style.display = "block"; }
             function hideLoading() { loadingIndicator.style.display = "none"; }
+
+            function showDeleteModal() { deleteModal.style.display = "block"; }
+            function hideDeleteModal() { deleteModal.style.display = "none"; }
 
             // Function to validate the table name
             function validateString(name) {
@@ -258,6 +266,9 @@
                 });
             }
             window.addEventListener('click', function(event) {
+                if (event.target == deleteModal) {
+                    hideDeleteModal();
+                }
                 if (event.target == modal) {
                     modal.style.display = "none";
                 }
@@ -310,7 +321,56 @@
                     }
                 });
             }
+
+            if (deleteLink) {
+                deleteLink.addEventListener('click', function(event) {
+                    event.preventDefault();
+                    showDeleteModal();
+                }
+            }
+            if (deleteCloseButton) {
+                deleteCloseButton.addEventListener('click', hideDeleteModal);
+            }
+            if (deleteCancelButton) {
+                deleteCancelButton.addEventListener('click', hideDeleteModal);
+            }
+
+            if (deleteConfirmButton) {
+                deleteConfirmButton.addEventListener('click', function(event) {
+                event.preventDefault(); // Prevent default button behavior
+        
+                showLoading();
+
+                var selectedTable = document.getElementById("table_select").value;
+
+                fetch('/delete', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': '{{ csrf_token }}'
+                    },
+                    body: JSON.stringify({ table_name: selectedTable })
+                    })
+                .then(response => response.json())
+                .then(data => {
+                    hideLoading();
+                    if (data.success) {
+//                        alert('Table "' + selectedTable + '" deleted successfully!');
+                        window.location.href = '/';
+                    } else {
+                        alert('Error deleting table: ' + data.error);
+                        hideDeleteModal();
+                    }
+                })
+                .catch(error => {
+                    hideLoading();
+                    console.error('Error:', error);
+                    alert('An unexpected error occurred.');
+                    hideDeleteModal();
+                });
+            });
         });
+    }
     </script>
     </head>
 <body>
@@ -348,6 +408,20 @@
                         <button type="button" class="cancel-button" onclick="document.getElementById('newTableModal').style.display='none'">Cancel</button>
                     </div>
                 </form>
+            </div>
+        </div>
+    </div>
+
+    <div id="deleteTableModal" class="modal">
+        <div class="modal-content">
+            <span class="close-button">&times;</span>
+            <b>Delete Table</b>
+            <div class="modal-body">
+                Are you sure you want to delete {{ selected_table }}?
+                    <div class="modal-buttons">
+                            <button type="submit">Delete</button>
+                            <button type="button" class="cancel-button">Cancel</button>
+                    </div>
             </div>
         </div>
     </div>
