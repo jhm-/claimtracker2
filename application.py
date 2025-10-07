@@ -93,6 +93,7 @@ class Configuration(configparser.RawConfigParser):
             logging.basicConfig(filename=self.get("Logging", "filename"), \
                                 level=loglevel(str(self.get("Logging", "level"))),
                                 format="%(asctime)s %(levelname)-8s %(message)s", filemode="w")
+#            logging.getLogger("sqlalchemy.engine").setLevel(logging.INFO)
         except:
             print("FATAL: Could not write to log\nMake sure <%s> is writable and try again" \
                   % self.get("Logging", "filename"), file=sys.stderr)

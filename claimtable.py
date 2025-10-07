@@ -53,6 +53,7 @@ def mysql_replace_into(table, conn, keys, data_iter):
                                                stmt.inserted.values())))
 
     conn.execute(update_stmt)
+    conn.commit() # method doesn't autocommit
 
 class ClaimTable(pygsheets.Spreadsheet):
     def __init__(self, conn, suffix, client, jsonsheet=None, id=None, load_config=True):
@@ -146,8 +147,13 @@ class ClaimTable(pygsheets.Spreadsheet):
     def destroy(self):
         logging.debug("Destroying table <%s>", self.title)
         try:
+            query = "DROP TABLE IF EXISTS " + self.title + ";" + \
+                    "DROP TABLE IF EXISTS " + self.title + self.suffix["config"] + ";" + \
+                    "DROP TABLE IF EXISTS " + self.title + self.suffix["compact"]
+            query = query.split(";")
             conn_lock.acquire()
-            self.conn.execute(text("DROP TABLE " + self.title))
+            for q in query:
+                self.conn.execute(text(q))
             conn_lock.release()
         except exc.SQLAlchemyError as e:
             logging.critical("Unable to drop table <%s>", self.title)
@@ -241,8 +247,8 @@ class ClaimTable(pygsheets.Spreadsheet):
     def load(self):
         """ Update expiry dates, load MySQL table into ClaimTable object, run compaction, link with cloud """
 #        logging.info("Updating expiries for all parcels in <%s>", self.title)
- #       for jurisdiction in self.supported_jurisdictions:
-  #          self.update(TableDefinition(), jurisdiction)
+#        for jurisdiction in self.supported_jurisdictions:
+#            self.update(TableDefinition(), jurisdiction)
 
         df = pd.DataFrame()
         # load MySQL table into first worksheet

@@ -97,7 +97,7 @@ def get_data_BC(tenure_list):
         "Owner": d["OWNER_NAME"],
         "Area_ha": d["AREA_IN_HECTARES"],
         "ParcelName": d["CLAIM_NAME"],
-        "RegTitleNumber": d["TENURE_NUMBER_ID"],
+        "RegTitleNumber": str(d["TENURE_NUMBER_ID"]),
         "NextDueDate": datetime.fromtimestamp(d["GOOD_TO_DATE"] / 1000)
             if d["GOOD_TO_DATE"] > 0 else datetime(1970, 1, 1) + timedelta(seconds=d["GOOD_TO_DATE"]/1000),
     } for d in data]
