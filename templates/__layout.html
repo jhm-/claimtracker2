@@ -299,7 +299,6 @@
                         .then(data => {
                             hideLoading();
                             if (data.success) {
-//                              alert('Table "' + tableName + '" created successfully!');
                                 var newOption = document.createElement("option");
                                 newOption.value = tableName;
                                 newOption.text = tableName;
@@ -337,40 +336,47 @@
 
             if (deleteConfirmButton) {
                 deleteConfirmButton.addEventListener('click', function(event) {
-                event.preventDefault(); // Prevent default button behavior
+                    event.preventDefault(); // Prevent default button behavior
         
-                showLoading();
+                    showLoading();
 
-                var selectedTable = document.getElementById("table_select").value;
+                    var selectedTable = document.getElementById("table_select").value;
 
-                fetch('/delete', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRFToken': '{{ csrf_token }}'
-                    },
-                    body: JSON.stringify({ table_name: selectedTable })
+                    fetch('/delete', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRFToken': '{{ csrf_token }}'
+                        },
+                        body: JSON.stringify({ table_name: selectedTable })
                     })
-                .then(response => response.json())
-                .then(data => {
-                    hideLoading();
-                    if (data.success) {
-//                        alert('Table "' + selectedTable + '" deleted successfully!');
-                        window.location.href = '/';
-                    } else {
-                        alert('Error deleting table: ' + data.error);
+                    .then(response => response.json())
+                    .then(data => {
+                        hideLoading();
+                        if (data.success) {
+                            var optionToRemove = tableSelect.querySelector('option[value="${selectedTable}"]');
+                            if (optionToRemove) {
+                                console.error("Got it")
+                                optionToRemove.remove();
+                            }
+                            if (tableSelect.options.length > 0) {
+                                tableSelect.value = tableSelect.options[0].value;
+                            }
+                            window.location.href = '/';
+                        } else {
+                            alert('Error deleting table: ' + data.error);
+                            hideDeleteModal();
+                        }
+                    })
+                    .catch(error => {
+                        hideLoading();
+                        console.error('Error:', error);
+                        alert('An unexpected error occurred.');
                         hideDeleteModal();
-                    }
-                })
-                .catch(error => {
-                    hideLoading();
-                    console.error('Error:', error);
-                    alert('An unexpected error occurred.');
-                    hideDeleteModal();
+                    });
                 });
-            });
-        }
-    });
+            }
+        });
     </script>
     </head>
 <body>
@@ -417,7 +423,7 @@
             <span class="close-button">&times;</span>
             <b>Delete Table</b>
             <div class="modal-body">
-                Are you sure you want to delete {{ selected_table }}?
+                    Are you sure you want to delete &lt;{{ selected_table }}&gt;? <i>This cannot be undone!</i>
                     <div class="modal-buttons">
                             <button type="submit">Delete</button>
                             <button type="button" class="cancel-button">Cancel</button>
@@ -426,6 +432,6 @@
         </div>
     </div>
 
-    <div id="loading-indicator">Creating Table...</div>
+    <div id="loading-indicator">Please wait...</div>
 </body>
 </html>

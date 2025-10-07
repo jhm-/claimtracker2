@@ -138,6 +138,8 @@ suffix = {}
 def index(table_name=None):
     tables = {}
     selected_url = None
+
+    global claimtables
     for c in claimtables:
         tables[c.title] = c.sheet1.url
     if request.method == "POST":
@@ -160,8 +162,9 @@ def new():
     table_name = data.get("table_name")
     if not table_name:
         table_name = "untitled"
-    # TODO: needs a dialog to rename from 'untitled'
     logging.info("New table - connecting with google sheets")
+
+    global claimtables
     try:
         gc = pygsheets.authorize(service_file=configuration.get("Credentials","file"))
         sheet = gc.sheet.create(table_name)
@@ -173,9 +176,25 @@ def new():
         logging.error("Error creating table: %s", e)
         return jsonify({"success": False, "error" : str(e)})
 
-@app.route("/delete")
+@app.route("/delete", methods=["GET", "POST"])
 def delete():
-    return redirect(url_for("index"))
+    data = request.get_json()
+    table_name = data.get("table_name")
+    if not table_name:
+        table_name = "untitled"
+    logging.info("Deleting table: %s", table_name)
+
+    global claimtables
+    try:
+        for c in claimtables:
+            if c.title == table_name:
+                c.destroy()
+                break
+        claimtables = [c for c in claimtables if c.title != table_name]
+        return jsonify({"success": True, "table_name": table_name, "redirect_url": url_for("index")})
+    except Exception as e:
+        logging.error("Error deleting table: %s", e)
+        return jsonify({"success": False, "error" : str(e)})
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
