@@ -326,7 +326,7 @@
                 deleteLink.addEventListener('click', function(event) {
                     event.preventDefault();
                     showDeleteModal();
-                }
+                });
             }
             if (deleteCloseButton) {
                 deleteCloseButton.addEventListener('click', hideDeleteModal);
@@ -369,8 +369,8 @@
                     hideDeleteModal();
                 });
             });
-        });
-    }
+        }
+    });
     </script>
     </head>
 <body>
