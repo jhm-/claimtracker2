@@ -18,6 +18,7 @@ import sys
 import argparse
 import configparser
 import logging
+import atexit
 import urllib
 import sqlalchemy
 from sqlalchemy import text, exc
@@ -32,7 +33,7 @@ app = Flask(__name__)
 app.config["SECRET_KEY"] = "claimtracker"
 csrf = CSRFProtect(app)
 
-version = "0.0.1"
+version = "0.0.3"
 config_path = "claimtracker.conf"
 
 class DbDefinition:
@@ -62,11 +63,12 @@ class DbDefinition:
         return "mysql+pyodbc:///?odbc_connect={}".format(params)
 
 class Configuration(configparser.RawConfigParser):
+    """ implements a configuration parser for an INI-type of language, sets defaults, and validates settings """
     def __init__(self):
         configparser.RawConfigParser.__init__(self)
 
     def validate(self):
-        """ Validates the configuration settings"""
+        """ validates the configuration settings"""
 
         # Validate the logging settings
         if not self.has_section("Logging"):
@@ -93,7 +95,6 @@ class Configuration(configparser.RawConfigParser):
             logging.basicConfig(filename=self.get("Logging", "filename"), \
                                 level=loglevel(str(self.get("Logging", "level"))),
                                 format="%(asctime)s %(levelname)-8s %(message)s", filemode="w")
-#            logging.getLogger("sqlalchemy.engine").setLevel(logging.INFO)
         except:
             print("FATAL: Could not write to log\nMake sure <%s> is writable and try again" \
                   % self.get("Logging", "filename"), file=sys.stderr)
@@ -113,11 +114,13 @@ class Configuration(configparser.RawConfigParser):
             self.set("Tables", "compact_suffix", "__cmpct")
 
     def load(self, filename):
+        """ reads the configuration file if it exists """
         self.filename = filename
-        if os.access(self.filename, os.W_OK): # Read file if it exists
+        if os.access(self.filename, os.W_OK):
             self.read(self.filename)
 
     def save(self, filename):
+        """ saves the configuration file """
         try:
             f = open(self.filename, "w")
             self.write(f)
@@ -126,7 +129,7 @@ class Configuration(configparser.RawConfigParser):
             logging.error(e)
 
 configuration = Configuration()
-configuration.validate()
+configuration.validate() # this sets the defaults before the main execution
 
 # shared among functions - initialize these later
 conn = None
@@ -136,6 +139,7 @@ suffix = {}
 @app.route("/", methods=["GET", "POST"])
 @app.route("/<string:table_name>", methods=["GET", "POST"])
 def index(table_name=None):
+    """ mapped index URL to the index function """
     tables = {}
     selected_url = None
 
@@ -158,6 +162,7 @@ def index(table_name=None):
 
 @app.route("/new", methods=["GET", "POST"])
 def new():
+    """ mapped new (claimtable) URL to the new function """
     data = request.get_json()
     table_name = data.get("table_name")
     if not table_name:
@@ -178,6 +183,7 @@ def new():
 
 @app.route("/delete", methods=["GET", "POST"])
 def delete():
+    """ mapped delete (claimtable) URL to the new function """
     data = request.get_json()
     table_name = data.get("table_name")
     if not table_name:
@@ -195,6 +201,15 @@ def delete():
     except Exception as e:
         logging.error("Error deleting table: %s", e)
         return jsonify({"success": False, "error" : str(e)})
+
+# Not catching signals with the development Werkzeug libary, so use atexit (may change in production?)
+def cleanup_on_exit():
+    """ application cleanup code """
+    print("Caught a Ctrl-C... cleanup")
+    for c in claimtables:
+        c.delete()
+
+atexit.register(cleanup_on_exit)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -286,11 +301,7 @@ if __name__ == "__main__":
     scheduler = Scheduler(configuration)
     scheduler.start()
 
-    # TODO: catching exceptions below doesn't work
     try:
         app.run(host=args.host)
     except (KeyboardInterrupt, SystemExit):
-        print("caught a Ctrl-C... cleanup")
-        for c in claimtables:
-            c.delete()
-        db_engine.dispose()
+        pass

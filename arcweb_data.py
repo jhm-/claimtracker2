@@ -23,6 +23,7 @@ from datetime import datetime, timedelta
 import time
 
 def get_data_NWT(tenure_list):
+    """ get tenure data from the Northwest Territories ArcGIS REST API """
     url = "https://www.apps.geomatics.gov.nt.ca/arcgis/rest/services/"
     service_url = "https://www.apps.geomatics.gov.nt.ca/arcgis/rest/services/GNWT/Economy_LCC/MapServer"
     layer = "Active Mineral Claims"
@@ -42,6 +43,7 @@ def get_data_NWT(tenure_list):
 
 
 def get_data_YK(tenure_list):
+    """ get tenure data from the Yukon ArcGIS REST API """
     url= "https://mapservices.gov.yk.ca/arcgis/rest/services/"
     service_url="https://mapservices.gov.yk.ca/arcgis/rest/services/GeoYukon/GY_Mining/MapServer"
     layer="Quartz Claims - 50k"
@@ -64,6 +66,7 @@ def get_data_YK(tenure_list):
 
 
 def get_data_NV(tenure_list):
+    """ get tenure data from the Nevada Divison of Minerals ArcGIS REST API """
     url = 'https://services.arcgis.com/CXYUMoYknZtf5Qr3/ArcGIS/rest/services/'
     service_url="https://services.arcgis.com/CXYUMoYknZtf5Qr3/ArcGIS/rest/services/ArcOnlineNvStateClaims/FeatureServer"
     layer='Claim Point Listings'
@@ -83,6 +86,7 @@ def get_data_NV(tenure_list):
 
 
 def get_data_BC(tenure_list):
+    """ get tenure data fom the British Columbia ArcGIS REST API """
     #url = 'https://maps.gov.bc.ca/arcserver/rest/services/'
     url = 'https://maps.gov.bc.ca/arcserver/rest/services/whse/'
     #service_url = 'https://maps.gov.bc.ca/arcserver/rest/services/mpcm/bcgwpub/MapServer'
@@ -105,6 +109,7 @@ def get_data_BC(tenure_list):
 
 
 def get_data_NU(tenure_list):
+    """ get tenure data from the Nunavut ArcGIS REST API """
     url = 'https://data.aadnc-aandc.gc.ca/geomatics/rest/services/Donnees_Ouvertes-Open_Data/'
     service_url = 'https://data.aadnc-aandc.gc.ca/geomatics/rest/services/Donnees_Ouvertes-Open_Data/Claim_minier_NU_Mineral_Claim/MapServer'
     layer = 0
@@ -124,6 +129,8 @@ def get_data_NU(tenure_list):
     return data
 
 def get_data(base_url, service_url, layer, tenure_list, tenure_filter_col, out_cols=None, batch_size=25):
+    """ wrapper for get_data_slice that iterates data retrieval through a list of tenures, and uses sleep(0.1) to not
+        overload the server """
     start = 0
     results = list()
     while start < len(tenure_list):
@@ -138,6 +145,7 @@ def get_data(base_url, service_url, layer, tenure_list, tenure_filter_col, out_c
     return results
 
 def get_data_slice(base_url, service_url, layer, tenure_list, tenure_filter_col, out_cols=None):
+    """ performs the query to retrieve the tenure information from the ArcGIS REST API """
     ags = restapi.ArcServer(base_url)
     if not out_cols:
         out_cols = "*"

@@ -42,8 +42,8 @@ class TableDefinition:
                      "NextDueDate"]
     column_map = dict()
 
-# custom to_sql method INSERT... ON DUPLICATE KEY UPDATE ...
 def mysql_replace_into(table, conn, keys, data_iter):
+    """ custom to_sql method to INSERT... ON DUPLICATE KEY UPDATE... """
     from sqlalchemy.dialects.mysql import insert
 
     data = [dict(zip(keys, row)) for row in data_iter]
@@ -56,6 +56,8 @@ def mysql_replace_into(table, conn, keys, data_iter):
     conn.commit() # method doesn't autocommit
 
 class ClaimTable(pygsheets.Spreadsheet):
+    """ the claimtable class is an extended class from pygsheets, with added functions to load Spreadsheet data from
+        MySQL, update tenure expiry dates, modify rows on the Spreadsheet, and more... """
     def __init__(self, conn, suffix, client, jsonsheet=None, id=None, load_config=True):
         super().__init__(client, jsonsheet, id)
         self.conn = conn
@@ -69,6 +71,7 @@ class ClaimTable(pygsheets.Spreadsheet):
             self.load_config()
 
     def load_config(self):
+        """ load the configuration SQL table that is linked to the claimtable, and update table-specific settings  """
         df = pd.DataFrame()
         try:
             query = "SELECT * FROM " + self.title + self.suffix["config"]
@@ -115,6 +118,8 @@ class ClaimTable(pygsheets.Spreadsheet):
             self.prune = 0
 
     def new(self):
+        """ generate a new table to store tenure data in the SQL database, and a table of associated configuration
+            settings, by coping the column information from templates """
         df = pd.DataFrame()
         try:
             query = "DROP TABLE IF EXISTS " + self.title + ";" + \
@@ -145,6 +150,8 @@ class ClaimTable(pygsheets.Spreadsheet):
         self.sheet1.link()
 
     def destroy(self):
+        """ drop the SQL table from the database, as well as the associated configuration and compacted tables, and
+            then use the pygsheets delete function to disconnect the google sheet and free memory """
         logging.debug("Destroying table <%s>", self.title)
         try:
             query = "DROP TABLE IF EXISTS " + self.title + ";" + \
@@ -161,75 +168,77 @@ class ClaimTable(pygsheets.Spreadsheet):
         self.delete()
 
     def update(self, inTable: TableDefinition, jurisdiction: str, RegTitleNumber=None):
-            if jurisdiction in self.supported_jurisdictions:
-                data_func = self.supported_jurisdictions[jurisdiction]
-            else:
-                raise NotImplementedError
+        """ update the tenure information by polling the appropriate ArcGIS REST API (see arcweb_data.py) """
+        if jurisdiction in self.supported_jurisdictions:
+            data_func = self.supported_jurisdictions[jurisdiction]
+        else:
+            raise NotImplementedError
 
-            if not inTable.name:
-                inTable.name = self.title
-            if not inTable.keyCol:
-                inTable.keyCol = "RegTitleNumber"
-            if not inTable.jurisdictionCol:
-                inTable.jurisdictionCol = "Jurisdiction"
+        if not inTable.name:
+            inTable.name = self.title
+        if not inTable.keyCol:
+            inTable.keyCol = "RegTitleNumber"
+        if not inTable.jurisdictionCol:
+            inTable.jurisdictionCol = "Jurisdiction"
 
-            conn_lock.acquire()
-            if not RegTitleNumber:
-                rows = self.conn.execute(text("SELECT " + inTable.keyCol + ", ProjectName, Comments FROM " + inTable.name + \
-                    " WHERE " + inTable.jurisdictionCol + "=\"" + jurisdiction + "\""))
-            else:
-                rows = self.conn.execute(text("SELECT " + inTable.keyCol + ", ProjectName, Comments FROM " + inTable.name + \
-                    " WHERE " + inTable.jurisdictionCol + "=\"" + jurisdiction + "\" AND RegTitleNumber=\"" + \
-                    str(RegTitleNumber) + "\""))
-            conn_lock.release()
+        conn_lock.acquire()
+        if not RegTitleNumber:
+            rows = self.conn.execute(text("SELECT " + inTable.keyCol + ", ProjectName, Comments FROM " + inTable.name + \
+                " WHERE " + inTable.jurisdictionCol + "=\"" + jurisdiction + "\""))
+        else:
+            rows = self.conn.execute(text("SELECT " + inTable.keyCol + ", ProjectName, Comments FROM " + inTable.name + \
+                " WHERE " + inTable.jurisdictionCol + "=\"" + jurisdiction + "\" AND RegTitleNumber=\"" + \
+                str(RegTitleNumber) + "\""))
+        conn_lock.release()
 
-            # if the list is empty, do not pass go
-            if not rows:
-                return
+        # if the list is empty, do not pass go
+        if not rows:
+            return
 
-            tenure_list = []
-            project_list = []
-            comment_list = []
-            for r in rows:
-                tenure_list.append(r[0])
-                project_list.append(r[1])
-                comment_list.append(r[2])
+        tenure_list = []
+        project_list = []
+        comment_list = []
+        for r in rows:
+            tenure_list.append(r[0])
+            project_list.append(r[1])
+            comment_list.append(r[2])
 
-            i = 0
-            start = 0
-            batch_size = 25
-            while start < len(tenure_list):
-                end = start + batch_size
-                if end > len(tenure_list):
-                    end = len(tenure_list)
+        i = 0
+        start = 0
+        batch_size = 25
+        while start < len(tenure_list):
+            end = start + batch_size
+            if end > len(tenure_list):
+                end = len(tenure_list)
 
-                tenure_data = data_func(tenure_list[start:end])
+            tenure_data = data_func(tenure_list[start:end])
 
-                for t in tenure_data:
-                    t["ProjectName"] = project_list[tenure_list.index(t["RegTitleNumber"])]
-                    t["Jurisdiction"] = jurisdiction
-                    t["Comments"] = comment_list[tenure_list.index(t["RegTitleNumber"])]
-                    t["UpdateDate"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    df = pd.DataFrame([t])
-                    conn_lock.acquire()
-                    # 'prune' ie. remove expired 
-                    if self.prune:
-                        for index, row in df.iterrows():
-                            if row["NextDueDate"] < datetime.now():
-                                logging.debug("Drop parcel <%s> where NextDueDate < datetime.now", \
-                                              row["RegTitleNumber"])
-                                self.conn.execute(text("DELETE FROM " + self.title + " WHERE RegTitleNumber=\"" + \
-                                     row["RegTitleNumber"] + "\""))
-                                df = df.drop(index)
-                    if not df.empty:
-                        df.to_sql(self.title, self.conn, index=False, if_exists="append", method=mysql_replace_into)
-                    conn_lock.release()
-                    i = i + 1
+            for t in tenure_data:
+                t["ProjectName"] = project_list[tenure_list.index(t["RegTitleNumber"])]
+                t["Jurisdiction"] = jurisdiction
+                t["Comments"] = comment_list[tenure_list.index(t["RegTitleNumber"])]
+                t["UpdateDate"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                df = pd.DataFrame([t])
+                conn_lock.acquire()
+                # 'prune' ie. remove expired 
+                if self.prune:
+                    for index, row in df.iterrows():
+                        if row["NextDueDate"] < datetime.now():
+                            logging.debug("Drop parcel <%s> where NextDueDate < datetime.now", \
+                                          row["RegTitleNumber"])
+                            self.conn.execute(text("DELETE FROM " + self.title + " WHERE RegTitleNumber=\"" + \
+                                 row["RegTitleNumber"] + "\""))
+                            df = df.drop(index)
+                if not df.empty:
+                    df.to_sql(self.title, self.conn, index=False, if_exists="append", method=mysql_replace_into)
+                conn_lock.release()
+                i = i + 1
 
-                time.sleep(0.1)
-                start = start + batch_size
+            time.sleep(0.1)
+            start = start + batch_size
 
     def modify_parcel(self, df_before, df_after):
+        """ modify a row in the claimtable """
         cell = self.sheet1.find(str(df_before.to_dict()["RegTitleNumber"][0]))
         address = (cell[0].address[0], 0)
         # re-order columns
@@ -237,15 +246,17 @@ class ClaimTable(pygsheets.Spreadsheet):
         self.sheet1.set_dataframe(df_after, address, encoding="utf-8", copy_head=False)
 
     def del_parcel(self, df):
+        """ delete a row in the claimtable """
         row = self.sheet1.find(str(df.to_dict()["RegTitleNumber"][0]))[0].row
         self.sheet1.delete_rows(row)
 
     def add_parcel(self, df):
+        """ add a row to the claimtable """
         df = df[self.column_order + [c for c in df.columns if c not in self.column_order]]
         self.sheet1.append_table(df.values.tolist(), start="A1", end=None, dimension="ROWS", overwrite=False)
 
     def load(self):
-        """ Update expiry dates, load MySQL table into ClaimTable object, run compaction, link with cloud """
+        """ update expiry dates, load MySQL table into ClaimTable object, run compaction, link with cloud """
 #        logging.info("Updating expiries for all parcels in <%s>", self.title)
 #        for jurisdiction in self.supported_jurisdictions:
 #            self.update(TableDefinition(), jurisdiction)
@@ -270,6 +281,8 @@ class ClaimTable(pygsheets.Spreadsheet):
         self.compaction()
 
     def compaction(self):
+        """ a sort function to group tenures that match in both name and expiry date - in many jurisdictions tenures are
+            of a fixed size and are numbered sequentially, and can be lumped together for better legibility """
         if self.compact:
             logging.info("Performing tenure compaction on table <%s>", self.title)
             self.compact_wks = self.add_worksheet(self.title + self.suffix["compact"])

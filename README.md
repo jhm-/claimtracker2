@@ -1,8 +1,4 @@
-Immediate goals:
-clean-up properly on Ctrl-C;
-
-Refactor: cleanup, better exception handling, Claimtable.update() method external use to application; unit tests;
-docstrings
+Immediate goals: cleanup, better exception handling, Claimtable.update() method external use to application; unit tests
 
 Proximate goal: add email functionality
 

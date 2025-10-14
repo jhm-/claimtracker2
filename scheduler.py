@@ -25,6 +25,13 @@ from pymysqlreplication import BinLogStreamReader
 from pymysqlreplication.row_event import DeleteRowsEvent, UpdateRowsEvent, WriteRowsEvent
 
 class Scheduler(threading.Thread):
+    """ the Scheduler thread performs three tasks:
+        1) connects to the MySQL binlog stream and monitors changes to the claimtable SQL tables, synchronizing with
+           google sheets;
+        2) updates the tenure expiry dates for each claimtable on a schedule set in its respective configuration;
+        3) emits an email status update for each claimtable to a mailing list and schedule set in its respective
+           configuration"""
+
     def __init__(self, configuration):
         super(Scheduler, self).__init__(daemon=True)
         self.configuration = configuration
@@ -98,4 +105,5 @@ class Scheduler(threading.Thread):
                 sleep(0.2)
 
         except (KeyboardInterrupt, SystemExit):
+            # TODO: this never gets triggered; put stream into application.py and pass through to Scheduler?
             stream.close()
