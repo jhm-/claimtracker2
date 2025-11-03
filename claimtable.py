@@ -203,6 +203,8 @@ class ClaimTable(pygsheets.Spreadsheet):
             project_list.append(r[1])
             comment_list.append(r[2])
 
+        # TODO: pop this next bit of code out (minus SQL) as a class method for use outside of a Claimtable object
+
         i = 0
         start = 0
         batch_size = 25

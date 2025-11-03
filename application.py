@@ -63,7 +63,7 @@ class DbDefinition:
         return "mysql+pyodbc:///?odbc_connect={}".format(params)
 
 class Configuration(configparser.RawConfigParser):
-    """ implements a configuration parser for an INI-type of language, sets defaults, and validates settings """
+    """ implements a configuration parser for an INI-type of language, sets defaults and validates settings """
     def __init__(self):
         configparser.RawConfigParser.__init__(self)
 
@@ -183,7 +183,7 @@ def new():
 
 @app.route("/delete", methods=["GET", "POST"])
 def delete():
-    """ mapped delete (claimtable) URL to the new function """
+    """ mapped delete (claimtable) URL to the delete function """
     data = request.get_json()
     table_name = data.get("table_name")
     if not table_name:
