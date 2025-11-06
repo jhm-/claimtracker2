@@ -36,6 +36,15 @@ class Scheduler(threading.Thread):
         super(Scheduler, self).__init__(daemon=True)
         self.configuration = configuration
 
+    #XXX: below methods are stubs as we develop the functions in the application logic
+    def prepare_email(self, claimtable):
+        body = ""
+        df = claimtable.get_as_df()
+        return body
+
+    def send_email(self, recipients, df):
+        return
+
     def run(self):
         db = {
                 "host": self.configuration.get("Database", "address"),
@@ -96,8 +105,7 @@ class Scheduler(threading.Thread):
                         continue
                     if table.email_schedule_iter <= now:
                         logging.info("Launching scheduled emailer for <%s>", str(table.title))
-                        # TODO: prepare body of the email (Feature Not Implemented)
-                        df = table.get_as_df()
+                        # TODO: prepare body of the email, send the email (features not implemented)
                         # iterrows or itertuples through df, drop claims with expiries > 1 mo, extract rows out of df
                         # into a new dataframe with expiries <= 1 wk
                         table.email_schedule_iter = table.email_schedule.next()

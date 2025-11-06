@@ -234,6 +234,7 @@
             var deleteModal = document.getElementById("deleteTableModal");
             var newLink = document.querySelector('.header-links a[href="/new"]');
             var deleteLink = document.querySelector('.header-links a[href="/delete"]');
+            var renameLink = document.querySelector('.header-links a[href="/rename"]');
             var closeButton = document.querySelector(".close-button");
             var deleteConfirmButton = deleteModal.querySelector('button[type="submit"]');
             var deleteCancelButton = deleteModal.querySelector('button.cancel-button');
@@ -260,6 +261,32 @@
                     modal.style.display = "block";
                 });
             }
+
+            if (renameLink) {
+                renameLink.addEventListener('click', function(event) {
+                    event.preventDefault();
+                    fetch('/rename', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRFToken': '{{ csrf_token }}'
+                        },
+                        body: JSON.stringify({ table_name: tableSelect.value })
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            if (data.redirect_url) {
+                                window.location.href = data.redirect_url;
+                            }
+                        }
+                    })
+                    .catch(error => {
+                        alert("An unexpected error occurred.");
+                    });
+                });
+            }
+
             if (closeButton) {
                 closeButton.addEventListener('click', function() {
                     modal.style.display = "none";
@@ -392,7 +419,7 @@
                 </select>
             </form>
             <div class="header-links">
-                <a href="/new">New</a> | <a href="/delete">Delete</a>
+                <a href="/new">New</a> | <a href="/rename">Rename</a> | <a href="/delete">Delete</a>
             </div>
         </div>
     <div id="content" class="content">

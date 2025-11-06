@@ -179,7 +179,25 @@ def new():
         return jsonify({"success": True, "table_name": table_name, "redirect_url": url_for("index")})
     except Exception as e:
         logging.error("Error creating table: %s", e)
-        return jsonify({"success": False, "error" : str(e)})
+        return jsonify({"success": False, "error": str(e)})
+
+@app.route("/rename", methods=["GET", "POST"])
+def rename():
+    """ mapped rename (claimtable) URL to the rename function """
+    data = request.get_json()
+    table_name = data.get("table_name")
+    if not table_name:
+        table_name = "untitled"
+    #XXX: we're using 'Rename' right now as a stub to develop the emailing functionality
+    logging.info("Emailing table expiries for: %s", table_name)
+    global claimtables
+    try:
+        for c in claimtables:
+            if c.title == table_name:
+                return jsonify({"success": True, "table_name": table_name, "redirect_url": url_for("index")})
+    except Exception as e:
+        logging.error("Error emailing table expiries: %s", e)
+        return jsonify({"success": False, "error": str(e)})
 
 @app.route("/delete", methods=["GET", "POST"])
 def delete():
@@ -200,7 +218,7 @@ def delete():
         return jsonify({"success": True, "table_name": table_name, "redirect_url": url_for("index")})
     except Exception as e:
         logging.error("Error deleting table: %s", e)
-        return jsonify({"success": False, "error" : str(e)})
+        return jsonify({"success": False, "error": str(e)})
 
 # Not catching signals with the development Werkzeug libary, so use atexit (may change in production?)
 def cleanup_on_exit():
