@@ -13,11 +13,11 @@
         
         /* Main Body Style */
         body { margin: 0; padding: 0; background-color: #f4f4f4; }
-        .container { max-width: 600px; margin: 0 auto; padding: 20px; background-color: #ffffff; border-radius: 8px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); }
+        .container { margin: 0 auto; padding: 20px; background-color: #ffffff; border-radius: 8px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); }
 
         /* Table Styling */
-        .data-table { width: 100%; border-collapse: collapse; margin: 20px 0; font-family: Arial, sans-serif; font-size: 14px; }
-        .data-table th, .data-table td { padding: 12px; text-align: left; border: 1px solid #dddddd; }
+        .data-table { width: 100%; border-collapse: collapse; margin: 20px 0; font-family: Arial, sans-serif; font-size: 12px; }
+        .data-table th, .data-table td { padding: 10px; text-align: left; border: 1px solid #dddddd; }
         .data-table th { background-color: #e9ecef; font-weight: bold; color: #333333; }
         .data-table td { color: #555555; }
         .header-row { background-color: #f8f9fa; }
@@ -53,7 +53,7 @@
             </table>
 
             <p style="font-family: Arial, sans-serif; font-size: 16px; color: #333333;">
-                Dear User,
+                    Dear {{ user }},
             </p>
             <p style="font-family: Arial, sans-serif; font-size: 16px; color: #333333;">
                 Please find the latest data regarding your tracked claims below:
@@ -62,24 +62,19 @@
             <table class="data-table" role="presentation" cellspacing="0" cellpadding="0" border="0">
                 <thead>
                     <tr class="header-row">
-                        <th>Project Name</th>
-                        <th>Jurisdiction</th>
-                        <th>Parcel Name</th>
-                        <th>Owner</th>
-                        <th>Registration Date</th>
-                        <th>Next Due Date</th>
-                        <th>Comments</th>
+                        {{ claim-data-columns }}
                     </tr>
                 </thead>
                 <tbody id="claim-data-rows">
-                    </tbody>
+                        {{ claim-data-rows }}
+                </tbody>
             </table>
 
             <p style="font-family: Arial, sans-serif; font-size: 16px; color: #333333; margin-top: 30px; text-align: center;">
                 For the complete dataset and detailed information, please click the link below:
             </p>
             <p style="text-align: center; margin-bottom: 20px;">
-                <a href="[GOOGLE_SHEET_URL]" class="button-link" target="_blank">
+                    <a href="{{ google-sheet-url }}" class="button-link" target="_blank">
                     View Full Google Sheet
                 </a>
             </p>
