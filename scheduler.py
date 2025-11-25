@@ -18,11 +18,16 @@ from claimtable import TableDefinition
 import configparser
 import logging
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 import pandas as pd
 from time import sleep
 from pymysqlreplication import BinLogStreamReader
 from pymysqlreplication.row_event import DeleteRowsEvent, UpdateRowsEvent, WriteRowsEvent
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+
+email_template_path = "templates/__email.html"
 
 class Scheduler(threading.Thread):
     """ the Scheduler thread performs three tasks:
@@ -36,14 +41,81 @@ class Scheduler(threading.Thread):
         super(Scheduler, self).__init__(daemon=True)
         self.configuration = configuration
 
-    #XXX: below methods are stubs as we develop the functions in the application logic
     def prepare_email(self, claimtable):
-        body = ""
-        df = claimtable.get_as_df()
-        return body
+        """ prepares the body of an email with a table of tenures that have anniversary dates < two weeks from today """
+        today = datetime.now()
+        two_week_expiry = today + timedelta(weeks=2)
 
-    def send_email(self, recipients, df):
-        return
+        df = claimtable.worksheet().get_as_df()
+        df = df[claimtable.column_order + [c for c in df.columns if c not in claimtable.column_order]]
+
+        df["RegDate"] = pd.to_datetime(df["RegDate"])
+        df["NextDueDate"] = pd.to_datetime(df["NextDueDate"])
+        df["UpdateDate"] = pd.to_datetime(df["UpdateDate"])
+        mask = df["NextDueDate"].notna() & (df["NextDueDate"] < two_week_expiry)
+
+        def date_formatter(x):
+            # handle timestamps
+            if isinstance(x, (datetime, pd.Timestamp)):
+                return x.strftime("%Y-%m-%d")
+            # return an empty string for missing values
+            if pd.isna(x):
+                return ""
+            # handle all other types
+            return str(x)
+        formatters = {col: date_formatter for col in df.columns }
+
+        html_content = df[mask].copy().fillna("").to_html(index=False, border=0, classes=None, formatters=formatters)
+
+        # Locate the content between <thead>...</thead> and <tbody>...</tbody> tags
+        header_start = html_content.find("<thead>") + len("<thead>")
+        header_end = html_content.find("</thead>")
+        body_start = html_content.find("<tbody>") + len("<tbody>")
+        body_end = html_content.find("</tbody>")
+
+        header_row_content = html_content[header_start:header_end].strip().lstrip("<tr>").rstrip("</tr>").strip()
+        # hacky, but drop the first line of header_row_content, because pandas always seems to apply a style to the <tr> tag
+        # TODO: can we do this less fragile?
+        header_row_content = header_row_content.split("\n")
+        header_row_content = "\n".join(header_row_content[1:]).strip()
+        body_rows_content = html_content[body_start:body_end].strip()
+
+        if body_rows_content == "":
+            body_rows_content = "<tr><td colspan=\"" + str(len(df.columns)) + "\"><i>" + \
+                "No tenure anniversary dates before " + two_week_expiry.strftime("%Y-%m-%d") + "</i></td></tr>"
+
+        # exceptions are caught at a higher level
+        with open(email_template_path, "r") as f:
+            template_html = f.read()
+
+        email_html = template_html.replace("{{ claim-data-columns }}", header_row_content)
+        email_html = email_html.replace("{{ claim-data-rows }}", body_rows_content)
+        email_html = email_html.replace("{{ google-sheet-url }}", claimtable.worksheet().url)
+
+        return email_html
+
+    def send_email(self, recipients, table_name, email_html):
+        """ sends an email of prepared html to a list of recipients using configuration-defined account information """
+        smtp_server = configuration.get("Emailer", "smtp_server")
+        email_account = configuration.get("Emailer", "email_account")
+        email_password = configuration.get("Emailer", "email_password")
+
+        message = MIMEMultipart("alternative")
+        message["Subject"] = "Claimtracker update: " + table_name
+        message["From"] = email_account
+
+        for r in recipients:
+            message["To"] = r
+            # replace user placeholder with the recipients email address
+            send_html = email_html.replace("{{ user }}", r)
+            message.attach(MIMEText(send_html, "html"))
+
+        # exceptions are caught at a higher level
+        with smtplib.SMTP(smtp_server, 587) as server:
+            server.starttls()
+            server.login(email_account, email_password)
+            server.sendmail(email_account, recipients, message.as_string())
+            logging.info(table_name + ": email successfuly sent to recipient " + r)
 
     def run(self):
         db = {
@@ -105,9 +177,12 @@ class Scheduler(threading.Thread):
                         continue
                     if table.email_schedule_iter <= now:
                         logging.info("Launching scheduled emailer for <%s>", str(table.title))
-                        # TODO: prepare body of the email, send the email (features not implemented)
-                        # iterrows or itertuples through df, drop claims with expiries > 1 mo, extract rows out of df
-                        # into a new dataframe with expiries <= 1 wk
+                        try:
+                            recipients = table.access_list
+                            email_html = self.prepare_email(table)
+                            self.send_email = (recipients, str(table.title), email_html)
+                        except Exception as e:
+                            logging.error("Error emailing table expiries for <%s>", e)
                         table.email_schedule_iter = table.email_schedule.next()
 
                 sleep(0.2)

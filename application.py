@@ -29,18 +29,11 @@ from flask_wtf.csrf import CSRFProtect, generate_csrf
 from threading import Thread
 from scheduler import Scheduler
 
-#XXX: for current developent of email - remove when done
-import pandas as pd
-from datetime import datetime, timedelta
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-
 app = Flask(__name__)
 app.config["SECRET_KEY"] = "claimtracker"
 csrf = CSRFProtect(app)
 
-version = "0.0.3"
+version = "0.1.2"
 config_path = "claimtracker.conf"
 
 class DbDefinition:
@@ -147,25 +140,43 @@ suffix = {}
 @app.route("/<string:table_name>", methods=["GET", "POST"])
 def index(table_name=None):
     """ mapped index URL to the index function """
-    tables = {}
+    table_urls = {}
+    table_properties = {}
     selected_url = None
 
     global claimtables
     for c in claimtables:
-        tables[c.title] = c.sheet1.url
+        table_urls[c.title] = c.sheet1.url
+        # want the raw data from c.config_df, and then we can write_config if there are changes
+        table_properties[c.title] = {
+            'ColumnOrder': c.config_df["ColumnOrder"].iloc[0],
+            'AccessList': c.config_df["AccessList"].iloc[0],
+            'UpdateSched': c.config_df["UpdateSched"].iloc[0],
+            'EmailSched': c.config_df["EmailSched"].iloc[0],
+            'Prune': True if c.config_df["Prune"].iloc[0] == "1" else False,
+            'Compact': True if c.config_df["Compact"].iloc[0] == "1" else False,
+            'CompactColumnOrder': c.config_df["CompactColumnOrder"].iloc[0]
+        }
     if request.method == "POST":
         selected_table = request.form.get("table_select")
         if selected_table:
-            selected_url = tables.get(selected_table)
+            selected_url = table_urls.get(selected_table)
             return redirect(url_for("index", table_name=selected_table))
     else:
         if table_name and table_name in tables:
             selected_table = table_name
         elif tables:
-            selected_table = list(tables.keys())[0]
-        selected_url = tables.get(selected_table)
-    return render_template("__layout.html", tables=tables.keys(), selected_table=selected_table, \
-                           selected_url=selected_url, csrf_token=generate_csrf())
+            selected_table = list(table_urls.keys())[0]
+        selected_url = table_urls.get(selected_table)
+        selected_properties = table_properties[selected_table]
+    return render_template("__layout.html", tables=table_urls.keys(), selected_table=selected_table, \
+                           selected_url=selected_url, property_values=selected_properties, \
+                           csrf_token=generate_csrf())
+
+@app.route("/properties", methods=["GET", "POST"])
+def update():
+    data = request.get_json()
+    return jsonify({'success': True, 'message': 'Properties updated.'})
 
 @app.route("/new", methods=["GET", "POST"])
 def new():
@@ -188,105 +199,24 @@ def new():
         logging.error("Error creating table: %s", e)
         return jsonify({"success": False, "error": str(e)})
 
-#XXX: testing the logic of the functions below before moving into scheduler
-email_template_path = "templates/__email.html"
-
-def prepare_email(claimtable):
-    """ prepares the body of an email with a table of tenures that have anniversary dates < two weeks from today """
-    today = datetime.now()
-    two_week_expiry = today + timedelta(weeks=2)
-
-    df = claimtable.worksheet().get_as_df()
-    df = df[claimtable.column_order + [c for c in df.columns if c not in claimtable.column_order]]
-
-    df["RegDate"] = pd.to_datetime(df["RegDate"])
-    df["NextDueDate"] = pd.to_datetime(df["NextDueDate"])
-    df["UpdateDate"] = pd.to_datetime(df["UpdateDate"])
-    mask = df["NextDueDate"].notna() & (df["NextDueDate"] < two_week_expiry)
-
-    def date_formatter(x):
-        # handle timestamps
-        if isinstance(x, (datetime, pd.Timestamp)):
-            return x.strftime("%Y-%m-%d")
-        # return an empty string for missing values
-        if pd.isna(x):
-            return ""
-        # handle all other types
-        return str(x)
-    formatters = {col: date_formatter for col in df.columns }
-
-    html_content = df[mask].copy().fillna("").to_html(index=False, border=0, classes=None, formatters=formatters)
-
-    # Locate the content between <thead>...</thead> and <tbody>...</tbody> tags
-    header_start = html_content.find("<thead>") + len("<thead>")
-    header_end = html_content.find("</thead>")
-    body_start = html_content.find("<tbody>") + len("<tbody>")
-    body_end = html_content.find("</tbody>")
-
-    header_row_content = html_content[header_start:header_end].strip().lstrip("<tr>").rstrip("</tr>").strip()
-    # hacky, but drop the first line of header_row_content, because pandas always seems to apply a style to the <tr> tag
-    # TODO: can we do this less fragile?
-    header_row_content = header_row_content.split("\n")
-    header_row_content = "\n".join(header_row_content[1:]).strip()
-    body_rows_content = html_content[body_start:body_end].strip()
-
-    if body_rows_content == "":
-        body_rows_content = "<tr><td colspan=\"" + str(len(df.columns)) + "\"><i>" + \
-            "No tenure anniversary dates before " + two_week_expiry.strftime("%Y-%m-%d") + "</i></td></tr>"
-
-    # exceptions are caught at a higher level
-    with open(email_template_path, "r") as f:
-        template_html = f.read()
-
-    email_html = template_html.replace("{{ claim-data-columns }}", header_row_content)
-    email_html = email_html.replace("{{ claim-data-rows }}", body_rows_content)
-    email_html = email_html.replace("{{ google-sheet-url }}", claimtable.worksheet().url)
-
-    return email_html
-
-def send_email(recipients, table_name, email_html):
-    """ sends an email of prepared html to a list of recipients using configuration-defined account information """
-    smtp_server = configuration.get("Emailer", "smtp_server")
-    email_account = configuration.get("Emailer", "email_account")
-    email_password = configuration.get("Emailer", "email_password")
-
-    message = MIMEMultipart("alternative")
-    message["Subject"] = "Claimtracker update: " + table_name
-    message["From"] = email_account
-
-    for r in recipients:
-        message["To"] = r
-        # replace user placeholder with the recipients email address
-        send_html = email_html.replace("{{ user }}", r)
-        message.attach(MIMEText(send_html, "html"))
-
-        # exceptions are caught at a higher level
-        with smtplib.SMTP(smtp_server, 587) as server:
-            server.starttls()
-            server.login(email_account, email_password)
-            server.sendmail(email_account, recipients, message.as_string())
-            logging.info(table_name + ": email successfuly sent to recipient " + r)
-
 @app.route("/rename", methods=["GET", "POST"])
 def rename():
     """ mapped rename (claimtable) URL to the rename function """
     data = request.get_json()
     table_name = data.get("table_name")
+    new_title = data.get("new_name")
     if not table_name:
         table_name = "untitled"
-    #XXX: we're using 'Rename' right now as a stub to develop the emailing functionality
-    logging.info("Emailing table expiries for: %s", table_name)
+
     global claimtables
     try:
         for c in claimtables:
             if c.title == table_name:
-                # XXX: get the recipients
-                recipients = c.access_list
-                email_html = prepare_email(c)
-                send_email(recipients, table_name, email_html)
-                return jsonify({"success": True, "table_name": table_name, "redirect_url": url_for("index")})
+                c.rename(new_title)
+                break
+        return jsonify({"success": True, "table_name": table_name, "redirect_url": url_for("index")})
     except Exception as e:
-        logging.error("Error emailing table expiries: %s", e)
+        logging.error("Error renaming table: %s", e)
         return jsonify({"success": False, "error": str(e)})
 
 @app.route("/delete", methods=["GET", "POST"])
@@ -296,7 +226,7 @@ def delete():
     table_name = data.get("table_name")
     if not table_name:
         table_name = "untitled"
-    logging.info("Deleting table: %s", table_name)
+    logging.info("Deleting table <%s>", table_name)
 
     global claimtables
     try:

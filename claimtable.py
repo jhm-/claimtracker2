@@ -116,6 +116,23 @@ class ClaimTable(pygsheets.Spreadsheet):
             self.compact_order = None # compaction will fail unless self.compact = 0
             self.compact = 0
             self.prune = 0
+            # create a one-row dataframe with the defaults
+            defaults = {
+                    "ColumnOrder": ";".join(self.column_order),
+                    "AccessList": [""],
+                    "UpdateSched": [""],
+                    "EmailSched": [""],
+                    "Prune": ["0"],
+                    "Compact": ["0"],
+                    "CompactColumnOrder": [""]
+            }
+            df = pd.DataFrame(defaults)
+
+            self.write_config(df)
+        self.config_df = df # save the dataframe for the raw values of the configuration properties
+
+    def write_config(self, df):
+        return
 
     def new(self):
         """ generate a new table to store tenure data in the SQL database, and a table of associated configuration
@@ -148,6 +165,33 @@ class ClaimTable(pygsheets.Spreadsheet):
         # can't freeze rows when there's only one row
         # self.sheet1.frozen_rows = 1
         self.sheet1.link()
+
+    def rename(self, new_title):
+        """ rename the SQL tables and the Claimtable worksheet titles """
+        logging.info("Renaming table <%s> -> <%s>", self.title, new_title)
+        new_title_config = new_title + self.suffix["config"]
+        new_title_compact = new_title + self.suffix["compact"]
+        try:
+            query = "ALTER TABLE " + self.title + " RENAME TO " + new_title + ";" + \
+                    "ALTER TABLE " + self.title + self.suffix["config"] + " RENAME TO " + new_title_config
+            query = query.split(";")
+            conn_lock.acquire()
+            for q in query:
+                self.conn.execute(text(q))
+            conn_lock.release()
+        except exc.SQLAlchemyError as e:
+            logging.critical("Unable to rename table <%s>", self.title)
+            logging.critical(e)
+            return
+        if self.compact_wks is not None:
+            try:
+                query = "ALTER TABLE " + self.title + self.suffix["compact"] + " RENAME TO " + new_title_compact
+            except exc.SQLAlchemyError as e:
+                logging.critical("Unable to rename table <%s>", self.title)
+                logging.critical(e)
+                return
+        self.title = new_title
+        return
 
     def destroy(self):
         """ drop the SQL table from the database, as well as the associated configuration and compacted tables, and
@@ -287,6 +331,8 @@ class ClaimTable(pygsheets.Spreadsheet):
             of a fixed size and are numbered sequentially, and can be lumped together for better legibility """
         if self.compact:
             logging.info("Performing tenure compaction on table <%s>", self.title)
+            if self.compact_wks is not None:
+                self.del_worksheet(compact_wks)
             self.compact_wks = self.add_worksheet(self.title + self.suffix["compact"])
             df = pd.DataFrame()
             with open("compaction_new.sql", "r") as file:
