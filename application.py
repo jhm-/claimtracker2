@@ -149,13 +149,13 @@ def index(table_name=None):
         table_urls[c.title] = c.sheet1.url
         # want the raw data from c.config_df, and then we can write_config if there are changes
         table_properties[c.title] = {
-            'ColumnOrder': c.config_df["ColumnOrder"].iloc[0],
-            'AccessList': c.config_df["AccessList"].iloc[0],
-            'UpdateSched': c.config_df["UpdateSched"].iloc[0],
-            'EmailSched': c.config_df["EmailSched"].iloc[0],
-            'Prune': True if c.config_df["Prune"].iloc[0] == "1" else False,
-            'Compact': True if c.config_df["Compact"].iloc[0] == "1" else False,
-            'CompactColumnOrder': c.config_df["CompactColumnOrder"].iloc[0]
+            "ColumnOrder": c.config_df["ColumnOrder"].iloc[0],
+            "AccessList": c.config_df["AccessList"].iloc[0],
+            "UpdateSched": c.config_df["UpdateSched"].iloc[0],
+            "EmailSched": c.config_df["EmailSched"].iloc[0],
+            "Prune": True if c.config_df["Prune"].iloc[0] == "1" else False,
+            "Compact": True if c.config_df["Compact"].iloc[0] == "1" else False,
+            "CompactColumnOrder": c.config_df["CompactColumnOrder"].iloc[0]
         }
     if request.method == "POST":
         selected_table = request.form.get("table_select")
@@ -174,9 +174,26 @@ def index(table_name=None):
                            csrf_token=generate_csrf())
 
 @app.route("/properties", methods=["GET", "POST"])
-def update():
+def update_properties():
     data = request.get_json()
-    return jsonify({'success': True, 'message': 'Properties updated.'})
+    table_name = data.get("table_name")
+    new_properties = {
+        "ColumnOrder": [data.get("ColumnOrder")],
+        "AccessList": [data.get("AccessList")],
+        "UpdateSched": [data.get("UpdateSched")],
+        "EmailSched": [data.get("EmailSched")],
+        "Prune": [data.get("Prune") == "true"],
+        "Compact": [data.get("Compact") == "true"],
+        "CompactColumnOrder": [data.get("CompactColumnOrder")]
+    }
+    try:
+        for c in claimtables:
+            if c.title == table_name:
+                c.update_config(new_properties)
+    except Exception as e:
+        logging.error("Error updating properties for table: %s", e)
+        return jsonify({"success": False, "error": str(e)})
+    return jsonify({"success": True, "message": "Properties updated."})
 
 @app.route("/new", methods=["GET", "POST"])
 def new():

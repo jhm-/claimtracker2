@@ -127,12 +127,41 @@ class ClaimTable(pygsheets.Spreadsheet):
                     "CompactColumnOrder": [""]
             }
             df = pd.DataFrame(defaults)
-
             self.write_config(df)
         self.config_df = df # save the dataframe for the raw values of the configuration properties
 
     def write_config(self, df):
-        return
+        def mysql_upsert_into(table, conn, keys, data_iter):
+            """ custom to_sql method to execute a REPLACE INTO statement ensuring single row with primary key id=1 """
+            cols = ["id"] + keys
+            cols_sql = ", ".join(cols)
+
+            values_placeholders = [f":{c}" for c in cols]
+            values_sql = ", ".join(values_placeholders)
+
+            sql = f"""
+                REPLACE INTO {table.name} ({cols_sql}) 
+                VALUES ({values_sql})
+            """
+
+            params = []
+            for row in data_iter:
+                param_dict = dict(zip(keys, row))
+                param_dict["id"] = 1 
+                params.append(param_dict)
+                break 
+
+            conn.execute(text(sql), params)
+            conn.commit() # method doesn't autocommit
+
+        if not df.empty:
+            df.to_sql(self.title + self.suffix["config"], self.conn, index=False, if_exists="append",
+                      method=mysql_upsert_into)
+
+    def update_config(self, table_properties):
+        self.config_df = pd.DataFrame(table_properties)
+        self.write_config(self.config_df)
+        self.load_config()
 
     def new(self):
         """ generate a new table to store tenure data in the SQL database, and a table of associated configuration
@@ -145,7 +174,8 @@ class ClaimTable(pygsheets.Spreadsheet):
                         "ALTER TABLE " + self.title + " ADD INDEX RegDate (RegDate);" + \
                         "ALTER TABLE " + self.title + " ADD INDEX UpdateDate (UpdateDate);" + \
                         "DROP TABLE IF EXISTS " + self.title + self.suffix["config"] + ";" + \
-                        "CREATE TABLE " + self.title + self.suffix["config"] + " LIKE _Config_Template"
+                        "CREATE TABLE " + self.title + self.suffix["config"] + " LIKE _Config_Template;" + \
+                        "ALTER TABLE " + self.title + self.suffix["config"] + " AUTO_INCREMENT = 1"
             query = query.split(";")
             conn_lock.acquire()
             for q in query:
