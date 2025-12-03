@@ -33,7 +33,7 @@ app = Flask(__name__)
 app.config["SECRET_KEY"] = "claimtracker"
 csrf = CSRFProtect(app)
 
-version = "0.1.2"
+version = "0.2.0"
 config_path = "claimtracker.conf"
 
 class DbDefinition:

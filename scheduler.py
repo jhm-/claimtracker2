@@ -96,9 +96,9 @@ class Scheduler(threading.Thread):
 
     def send_email(self, recipients, table_name, email_html):
         """ sends an email of prepared html to a list of recipients using configuration-defined account information """
-        smtp_server = configuration.get("Emailer", "smtp_server")
-        email_account = configuration.get("Emailer", "email_account")
-        email_password = configuration.get("Emailer", "email_password")
+        smtp_server = self.configuration.get("Emailer", "smtp_server")
+        email_account = self.configuration.get("Emailer", "email_account")
+        email_password = self.configuration.get("Emailer", "email_password")
 
         message = MIMEMultipart("alternative")
         message["Subject"] = "Claimtracker update: " + table_name
@@ -180,7 +180,7 @@ class Scheduler(threading.Thread):
                         try:
                             recipients = table.access_list
                             email_html = self.prepare_email(table)
-                            self.send_email = (recipients, str(table.title), email_html)
+                            self.send_email(recipients, str(table.title), email_html)
                         except Exception as e:
                             logging.error("Error emailing table expiries for <%s>", e)
                         table.email_schedule_iter = table.email_schedule.next()
