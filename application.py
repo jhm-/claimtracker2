@@ -140,12 +140,14 @@ suffix = {}
 @app.route("/<string:table_name>", methods=["GET", "POST"])
 def index(table_name=None):
     """ mapped index URL to the index function """
+    tables = []
     table_urls = {}
     table_properties = {}
     selected_url = None
 
     global claimtables
     for c in claimtables:
+        tables.append(c.title)
         table_urls[c.title] = c.sheet1.url
         # want the raw data from c.config_df, and then we can write_config if there are changes
         table_properties[c.title] = {
@@ -153,23 +155,24 @@ def index(table_name=None):
             "AccessList": c.config_df["AccessList"].iloc[0],
             "UpdateSched": c.config_df["UpdateSched"].iloc[0],
             "EmailSched": c.config_df["EmailSched"].iloc[0],
-            "Prune": True if c.config_df["Prune"].iloc[0] == "1" else False,
-            "Compact": True if c.config_df["Compact"].iloc[0] == "1" else False,
+            "Prune": str(c.config_df["Prune"].iloc[0] == 1),
+            "Compact": str(c.config_df["Compact"].iloc[0] == 1),
             "CompactColumnOrder": c.config_df["CompactColumnOrder"].iloc[0]
         }
     if request.method == "POST":
         selected_table = request.form.get("table_select")
         if selected_table:
-            selected_url = table_urls.get(selected_table)
+#            selected_url = table_urls.get(selected_table)
             return redirect(url_for("index", table_name=selected_table))
     else:
         if table_name and table_name in tables:
             selected_table = table_name
         elif tables:
-            selected_table = list(table_urls.keys())[0]
-        selected_url = table_urls.get(selected_table)
-        selected_properties = table_properties[selected_table]
-    return render_template("__layout.html", tables=table_urls.keys(), selected_table=selected_table, \
+            selected_table = tables[0]
+        if selected_table:
+            selected_url = table_urls.get(selected_table)
+            selected_properties = table_properties.get(selected_table, {})
+    return render_template("__layout.html", tables=tables, selected_table=selected_table, \
                            selected_url=selected_url, property_values=selected_properties, \
                            csrf_token=generate_csrf())
 
@@ -182,8 +185,8 @@ def update_properties():
         "AccessList": [data.get("AccessList")],
         "UpdateSched": [data.get("UpdateSched")],
         "EmailSched": [data.get("EmailSched")],
-        "Prune": [data.get("Prune") == "true"],
-        "Compact": [data.get("Compact") == "true"],
+        "Prune": [data.get("Prune") == "True"],
+        "Compact": [data.get("Compact") == "True"],
         "CompactColumnOrder": [data.get("CompactColumnOrder")]
     }
     try:

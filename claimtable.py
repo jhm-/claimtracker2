@@ -80,7 +80,7 @@ class ClaimTable(pygsheets.Spreadsheet):
             conn_lock.release()
         except exc.SQLAlchemyError as e:
             logging.critical("Unable to read table <%s> into dataframe", self.title)
-            logging.critcal(e)
+            logging.critical(e)
         # crontab-like schedule definitions for updating expiries and emailing the access_list
         now = datetime.now()
         # TODO: better exception handling
@@ -107,10 +107,11 @@ class ClaimTable(pygsheets.Spreadsheet):
                 logging.critical("Unable to read configuration parameters for <%s>", self.title)
         else:
             # TODO: default settings need to be handled better
-            self.update_schedule = Cron()
-            self.update_schedule_iter = None
-            self.email_schedule = Cron()
-            self.email_schedule.iter = None
+            # January 31 on a Monday will next be in 2033 (ie. the default, "* * 31 1 1")
+            self.update_schedule = Cron("* * 31 1 1").schedule(now)
+            self.update_schedule_iter = self.update_schedule.next()
+            self.email_schedule = Cron("* * 31 1 1").schedule(now)
+            self.email_schedule_iter = self.email_schedule.next()
             self.access_list = []
             self.column_order = TableDefinition().required_cols
             self.compact_order = None # compaction will fail unless self.compact = 0
@@ -120,8 +121,8 @@ class ClaimTable(pygsheets.Spreadsheet):
             defaults = {
                     "ColumnOrder": ";".join(self.column_order),
                     "AccessList": [""],
-                    "UpdateSched": [""],
-                    "EmailSched": [""],
+                    "UpdateSched": ["* * 31 1 1"], 
+                    "EmailSched": ["* * 31 1 1"],
                     "Prune": ["0"],
                     "Compact": ["0"],
                     "CompactColumnOrder": [""]

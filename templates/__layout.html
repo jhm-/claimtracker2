@@ -378,7 +378,6 @@
                 .then(data => {
                     hideLoading();
                     if (data.success) {
-                        alert('Table properties updated successfully!');
                         hidePropertiesModal();
                     } else {
                         alert('Error updating properties: ' + data.error);
@@ -647,15 +646,15 @@
                         <div class="form-field">
                             <label for="Prune">Prune:</label>
                             <select name="Prune" id="Prune" required>
-                                <option value="true" {% if property_values.Prune == 'true' %}selected{% endif %}>True</option>
-                                <option value="false" {% if property_values.Prune == 'false' %}selected{% endif %}>False</option>
+                                <option value="True" {% if property_values.Prune == 'True' %}selected{% endif %}>True</option>
+                                <option value="False" {% if property_values.Prune == 'False' %}selected{% endif %}>False</option>
                             </select>
                         </div>
                         <div class="form-field">
                             <label for="Compact">Compact:</label>
                             <select name="Compact" id="Compact" required>
-                                <option value="true" {% if property_values.Compact == 'true' %}selected{% endif %}>True</option>
-                                <option value="false" {% if property_values.Compact == 'false' %}selected{% endif %}>False</option>
+                                <option value="True" {% if property_values.Compact == 'True' %}selected{% endif %}>True</option>
+                                <option value="False" {% if property_values.Compact == 'False' %}selected{% endif %}>False</option>
                             </select>
                         </div>
                     </div>
