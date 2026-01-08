@@ -1,4 +1,4 @@
-# Copyright (c) 2025 Welcome North Capital Corp.
+# Copyright (c) 2026 Welcome North Capital Corp.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
 # documentation files (the "Software"), to deal in the Software without restriction, including without limitation the
@@ -23,6 +23,7 @@ import pandas as pd
 from time import sleep
 from pymysqlreplication import BinLogStreamReader
 from pymysqlreplication.row_event import DeleteRowsEvent, UpdateRowsEvent, WriteRowsEvent
+from sqlalchemy import exc
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -39,12 +40,13 @@ class Scheduler(threading.Thread):
 
     def __init__(self, configuration):
         super(Scheduler, self).__init__(daemon=True)
+        self.stream = None
         self.configuration = configuration
 
     def prepare_email(self, claimtable):
-        """ prepares the body of an email with a table of tenures that have anniversary dates < two weeks from today """
+        """ prepares the body of an email with a table of tenures that have anniversary dates < 4 weeks from today """
         today = datetime.now()
-        two_week_expiry = today + timedelta(weeks=2)
+        two_week_expiry = today + timedelta(weeks=4)
 
         df = claimtable.worksheet().get_as_df()
         df = df[claimtable.column_order + [c for c in df.columns if c not in claimtable.column_order]]
@@ -124,14 +126,14 @@ class Scheduler(threading.Thread):
                 "user": self.configuration.get("Database", "root_user"),
                 "password": self.configuration.get("Database", "root_password")
         }
-        stream = BinLogStreamReader(connection_settings=db, server_id=100, resume_stream=True, \
+        self.stream = BinLogStreamReader(connection_settings=db, server_id=100, resume_stream=True, \
                                     only_events=[DeleteRowsEvent, WriteRowsEvent, UpdateRowsEvent], \
                                     enable_logging=False)
         try:
             while True:
                 # updates only in one direction, MySQL->Google Sheet
                 # first check the MySQL binlog for changes
-                for binlogevent in stream:
+                for binlogevent in self.stream:
                     # binlogevent.table is the table, binlogevent.rows is the row
                     if isinstance(binlogevent, DeleteRowsEvent):
                         logging.debug("DeleteRowsEvent on <%s>", str(binlogevent.table))
@@ -187,6 +189,11 @@ class Scheduler(threading.Thread):
 
                 sleep(0.2)
 
-        except (KeyboardInterrupt, SystemExit):
-            # TODO: this never gets triggered; put stream into application.py and pass through to Scheduler?
-            stream.close()
+#        except (KeyboardInterrupt, SystemExit): # this never gets triggered
+        except exc.SQLAlchemyError:
+            logging.critical("FATAL: database connection lost - application shutdown")
+            os.kill(os.getpid(), signal.SIGTERM)
+            self.stop()
+
+    def stop(self):
+        self.stream.close()

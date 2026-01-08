@@ -1,4 +1,4 @@
-# Copyright (c) 2025 Welcome North Capital Corp.
+# Copyright (c) 2026 Welcome North Capital Corp.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
 # documentation files (the "Software"), to deal in the Software without restriction, including without limitation the
@@ -33,7 +33,7 @@ app = Flask(__name__)
 app.config["SECRET_KEY"] = "claimtracker"
 csrf = CSRFProtect(app)
 
-version = "0.2.0"
+version = "0.2.1"
 config_path = "claimtracker.conf"
 
 class DbDefinition:
@@ -132,8 +132,7 @@ configuration = Configuration()
 configuration.validate() # this sets the defaults before the main execution
 
 # shared among functions - initialize these later
-conn = None
-#gc = None
+db_engine = None
 suffix = {}
 
 @app.route("/", methods=["GET", "POST"])
@@ -211,7 +210,7 @@ def new():
     try:
         gc = pygsheets.authorize(service_file=configuration.get("Credentials","file"))
         sheet = gc.sheet.create(table_name)
-        c = ClaimTable(conn, suffix, gc, sheet, load_config=False)
+        c = ClaimTable(db_engine, suffix, gc, sheet, load_config=False)
         c.new()
         claimtables.append(c)
         return jsonify({"success": True, "table_name": table_name, "redirect_url": url_for("index")})
@@ -260,12 +259,15 @@ def delete():
         logging.error("Error deleting table: %s", e)
         return jsonify({"success": False, "error": str(e)})
 
-# Not catching signals with the development Werkzeug libary, so use atexit (may change in production?)
+scheduler = None
+
 def cleanup_on_exit():
     """ application cleanup code """
-    print("Caught a Ctrl-C... cleanup")
+    print("Caught a shutdown signal... cleanup")
+    scheduler.stop()
     for c in claimtables:
         c.delete()
+    db_engine.dispose()
 
 atexit.register(cleanup_on_exit)
 
@@ -278,6 +280,8 @@ if __name__ == "__main__":
     configuration.validate()
     logging.info("Claimtracker initialized...")
 
+    scheduler = Scheduler(configuration)
+
     db = DbDefinition()
     db.address = configuration.get("Database","address")
     db.port = configuration.get("Database", "port")
@@ -285,11 +289,13 @@ if __name__ == "__main__":
     db.user = configuration.get("Database", "user")
     db.password = configuration.get("Database", "password")
     try:
-        db_engine = sqlalchemy.create_engine(db.connection_string())
+        db_engine = sqlalchemy.create_engine(db.connection_string(), pool_pre_ping=True, pool_recycle=3600, \
+                                             connect_args={"timeout": 10})
         conn = db_engine.connect()
     except exc.SQLAlchemyError as e:
-        logging.critical("Unable to connect to the remote server <%s>", db.address)
+        logging.critical("FATAL: Unable to connect to the remote server <%s>", db.address)
         logging.critical(e)
+        sys.exit(1)
 
     logging.info("Generating table list from database <%s>", db.database)
     try:
@@ -315,8 +321,9 @@ if __name__ == "__main__":
                 i = i + 1
         logging.debug("Found tables: %s", tables)
     except exc.SQLAlchemyError as e:
-        logging.critical("Error fetching data")
+        logging.critical("FATAL: Error fetching data")
         logging.critical(e)
+        sys.exit(1)
 
     logging.info("Connecting with google sheets")
     gc = pygsheets.authorize(service_file=configuration.get("Credentials","file"))
@@ -336,16 +343,16 @@ if __name__ == "__main__":
         except pygsheets.SpreadsheetNotFound:
             logging.debug("Spreadsheet not found: %s", t)
         except Exception as e:
-            logging.critical("Error deleting spreadsheet <%s>", t)
-            logging.critical(e)
+            logging.error("Error deleting spreadsheet <%s>", t)
+            logging.error(e)
         try:
             logging.debug("Creating google spreadsheet <%s>", t)
             sheet = gc.sheet.create(t)
-            claimtables.append(ClaimTable(conn, suffix, gc, sheet))
+            claimtables.append(ClaimTable(db_engine, suffix, gc, sheet))
         except Exception as e:
-            logging.critical("Error creating spreadsheet <%s>", t)
-            logging.critical(e)
-            logging.critical(e.args)
+            logging.error("Error creating spreadsheet <%s>", t)
+            logging.error(e)
+            logging.error(e.args)
 
     logging.info("Loading table data for %s tables into google sheets", str(len(tables)))
     for c in claimtables:
@@ -353,10 +360,10 @@ if __name__ == "__main__":
             c.load()
             logging.debug("Worksheet url for table <%s> : %s", c.title, c.sheet1.url)
         except Exception as e:
-            logging.critical(e)
+            logging.critical("FATAL: %s", e)
+            sys.exit(1)
 
     logging.info("Launching the scheduling thread")
-    scheduler = Scheduler(configuration)
     scheduler.start()
 
     try:
