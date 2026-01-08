@@ -324,6 +324,8 @@ if __name__ == "__main__":
         logging.critical("FATAL: Error fetching data")
         logging.critical(e)
         sys.exit(1)
+    finally:
+        conn.close()
 
     logging.info("Connecting with google sheets")
     gc = pygsheets.authorize(service_file=configuration.get("Credentials","file"))

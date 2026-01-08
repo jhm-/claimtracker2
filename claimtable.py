@@ -77,11 +77,12 @@ class ClaimTable(pygsheets.Spreadsheet):
         conn_lock.acquire()
         try:
             with self.engine.connect() as conn:
-                df = pd.read_sql(query, con=conn)
+                df = pd.read_sql(text(query), con=conn)
         except exc.SQLAlchemyError as e:
             logging.error("Unable to read table <%s> into dataframe", self.title)
             logging.error(e)
-        conn_lock.release()
+        finally:
+            conn_lock.release()
 
         # crontab-like schedule definitions for updating expiries and emailing the access_list
         now = datetime.now()
@@ -162,7 +163,8 @@ class ClaimTable(pygsheets.Spreadsheet):
             except exc.SQLAlchemyError as e:
                 logging.error("Unable to write configuration to table <%s>", self.title + self.suffix["config"])
                 logging.error(e)
-            conn_lock.release()
+            finally:
+                conn_lock.release()
 
     def update_config(self, table_properties):
         self.config_df = pd.DataFrame(table_properties)
@@ -189,11 +191,12 @@ class ClaimTable(pygsheets.Spreadsheet):
                 for q in query:
                     conn.execute(text(q))
                 query = "SELECT * FROM " + self.title
-                df = pd.read_sql(query, con=conn) # Put the columns into the dataframe
+                df = pd.read_sql(text(query), con=conn) # Put the columns into the dataframe
         except exc.SQLAlchemyError as e:
             logging.error("Unable to create new table <%s>", self.title)
             logging.error(e)
-        conn_lock.release()
+        finally:
+            conn_lock.release()
 
         self.load_config()
 
@@ -221,9 +224,9 @@ class ClaimTable(pygsheets.Spreadsheet):
         except exc.SQLAlchemyError as e:
             logging.error("Unable to rename table <%s>", self.title)
             logging.error(e)
-            conn_lock.release()
             return
-        conn_lock.release()
+        finally:
+            conn_lock.release()
 
         if self.compact_wks is not None:
             conn_lock.acquire()
@@ -234,9 +237,9 @@ class ClaimTable(pygsheets.Spreadsheet):
             except exc.SQLAlchemyError as e:
                 logging.error("Unable to rename table <%s>", self.title)
                 logging.error(e)
-                conn_lock.release()
                 return
-            conn_lock.release()
+            finally:
+                conn_lock.release()
 
         self.title = new_title
 
@@ -257,7 +260,8 @@ class ClaimTable(pygsheets.Spreadsheet):
         except exc.SQLAlchemyError as e:
             logging.error("Unable to drop table <%s>", self.title)
             logging.error(e)
-        conn_lock.release()
+        finally:
+            conn_lock.release()
 
         self.delete()
 
@@ -288,7 +292,8 @@ class ClaimTable(pygsheets.Spreadsheet):
         except exc.SQLAlchemyError as e:
             logging.error("Error retrieving tenure data from table <%s>", self.title)
             logging.error(e)
-        conn_lock.release()
+        finally:
+            conn_lock.release()
 
         # if the list is empty, do not pass go
         if not rows:
@@ -338,7 +343,8 @@ class ClaimTable(pygsheets.Spreadsheet):
                 except exc.SQLAlchemyError as e:
                     logging.error("Error updating expiry dates for table <%s>", self.title)
                     logging.error(e)
-                conn_lock.release()
+                finally:
+                    conn_lock.release()
                 i = i + 1
 
             time.sleep(0.1)
@@ -370,13 +376,13 @@ class ClaimTable(pygsheets.Spreadsheet):
         try:
             with self.engine.connect() as conn:
                 query = "SELECT * FROM " + self.title
-                df = pd.read_sql(query, con=conn)
+                df = pd.read_sql(text(query), con=conn)
         except exc.SQLAlchemyError as e:
             logging.critical("FATAL: unable to read table <%s> into dataframe", self.title)
             logging.critcal(e)
-            conn_lock.release()
             sys.exit(1)
-        conn_lock.release()
+        finally:
+            conn_lock.release()
 
         # re-order columns
         df = df[self.column_order + [c for c in df.columns if c not in self.column_order]]
@@ -411,7 +417,8 @@ class ClaimTable(pygsheets.Spreadsheet):
             except exc.SQLAlchemyError as e:
                 logging.error("Unable to generate table compaction for <%s>", self.title)
                 logging.error(e)
-            conn_lock.release()
+            finally:
+                conn_lock.release()
 
             # drop and re-order google sheet
             df = df.drop(columns=["Area_ha", "TitleNumberDistance"])
