@@ -20,7 +20,7 @@ import logging
 import threading
 from datetime import datetime, timedelta
 import pandas as pd
-from time import sleep
+from time import time, sleep
 from pymysqlreplication import BinLogStreamReader
 from pymysqlreplication.row_event import DeleteRowsEvent, UpdateRowsEvent, WriteRowsEvent
 from sqlalchemy import exc
@@ -129,41 +129,37 @@ class Scheduler(threading.Thread):
         self.stream = BinLogStreamReader(connection_settings=db, server_id=100, resume_stream=True, \
                                     only_events=[DeleteRowsEvent, WriteRowsEvent, UpdateRowsEvent], \
                                     enable_logging=False)
+        pending_syncs = {}
+        SYNC_DELAY = 2 # batch MySQL table changes and synchronize with google sheets every 2 seconds
+
+        # first synchronize changes to the sql table with google sheets
         try:
             while True:
                 # updates only in one direction, MySQL->Google Sheet
-                # first check the MySQL binlog for changes
-                for binlogevent in self.stream:
-                    # binlogevent.table is the table, binlogevent.rows is the row
-                    if isinstance(binlogevent, DeleteRowsEvent):
-                        logging.debug("DeleteRowsEvent on <%s>", str(binlogevent.table))
-                        for row in binlogevent.rows:
-                            values = row["values"]
-                            df = pd.DataFrame([values])
-                            table = next((table for table in claimtables if table.title == binlogevent.table), None)
-                            if table:
-                                table.del_parcel(df)
-                    if isinstance(binlogevent, UpdateRowsEvent):
-                        logging.debug("UpdateRowsEvent on <%s>", str(binlogevent.table))
-                        for row in binlogevent.rows:
-                            before_values = row["before_values"]
-                            after_values = row["after_values"]
-                            df_before = pd.DataFrame([before_values])
-                            df_after = pd.DataFrame([after_values])
-                            table = next((table for table in claimtables if table.title == binlogevent.table), None)
-                            if table:
-                                table.modify_parcel(df_before, df_after)
-                    if isinstance(binlogevent, WriteRowsEvent):
-                        logging.debug("WriteRowsEvent, on <%s>", str(binlogevent.table))
-                        for row in binlogevent.rows:
-                            values = row["values"]
-                            df = pd.DataFrame([values])
-                            table = next((table for table in claimtables if table.title == binlogevent.table), None)
-                            if table:
-                                table.add_parcel(df)
+                binlogevent = self.stream.fetchone()
 
-                # Then check the time and date for the update process, email process
-                # These functions are blocking; MySQL binlog changes will be backlogged while the process runs below
+                if binlogevent:
+                    t_name = binlogevent.table
+                    # any event (delete, update or write) makes the table out of sync
+                    if isinstance(binlogevent, (DeleteRowsEvent, UpdateRowsEvent, WriteRowsEvent)):
+                        pending_syncs[t_name] = time()
+
+                now = time()
+                ready_to_finalize = [t for t, last_change_time in pending_syncs.items() \
+                                     if (now - last_change_time) >= SYNC_DELAY]
+                for t_name in ready_to_finalize:
+                    del pending_syncs[t_name]
+                    table_obj = next((t for t in claimtables if t.title == t_name), None)
+                    if table_obj:
+                        try:
+                            logging.info("Executing bulk synchronization for table <%s>", t_name)
+                            table_obj.bulk_sync()
+                        except Exception as e:
+                            logging.error("Synchronization cycle failed for <%s>", t_name)
+                            logging.error(e)
+
+                # then check the time and date for the update process, email process
+                # these functions are blocking; MySQL binlog changes will be backlogged while the process runs below
                 # this could present a race condition - for now it's up to the user to not schedule everything at once
                 now = datetime.now()
                 for table in claimtables:
@@ -189,11 +185,13 @@ class Scheduler(threading.Thread):
 
                 sleep(0.2)
 
-#        except (KeyboardInterrupt, SystemExit): # this never gets triggered
         except exc.SQLAlchemyError:
             logging.critical("FATAL: database connection lost - application shutdown")
             os.kill(os.getpid(), signal.SIGTERM)
             self.stop()
 
     def stop(self):
-        self.stream.close()
+        try:
+            self.stream.close()
+        except AttributeError:
+            return

@@ -368,6 +368,26 @@ class ClaimTable(pygsheets.Spreadsheet):
         df = df[self.column_order + [c for c in df.columns if c not in self.column_order]]
         self.sheet1.append_table(df.values.tolist(), start="A1", end=None, dimension="ROWS", overwrite=False)
 
+    def bulk_sync(self):
+        """ pulls the current SQL table and pushes the whole thing to GSheets in one call """
+        df = pd.DataFrame()
+
+        conn_lock.acquire()
+        try:
+            with self.engine.connect() as conn:
+                query = "SELECT * FROM " + self.title
+                df = pd.read_sql(text(query), con=conn)
+        except exc.SQLAlchemyError as e:
+            logging.error("Database read failed during bulk sync for <%s>", self.title)
+            logging.error(e)
+            return
+        finally:
+            conn_lock.release()
+
+        if not df.empty:
+            df = df[self.column_order + [c for c in df.columns if c not in self.column_order]]
+            self.sheet1.set_dataframe(df, (1,1), encoding="utf-8", fit=True)
+
     def load(self):
         """ update expiry dates, load MySQL table into ClaimTable object, run compaction, link with cloud """
         df = pd.DataFrame()
