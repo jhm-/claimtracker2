@@ -23,7 +23,7 @@ import urllib
 import sqlalchemy
 from sqlalchemy import text, exc
 import pygsheets
-from claimtable import ClaimTable, claimtables, conn_lock
+from claimtable import ClaimTable, TableDefinition, claimtables, conn_lock
 from flask import Flask, render_template, request, redirect, url_for, jsonify
 from flask_wtf.csrf import CSRFProtect, generate_csrf
 from threading import Thread
@@ -195,7 +195,31 @@ def update_properties():
     except Exception as e:
         logging.error("Error updating properties for table: %s", e)
         return jsonify({"success": False, "error": str(e)})
-    return jsonify({"success": True, "message": "Properties updated."})
+    return jsonify({"success": True, "message": "Properties updated"})
+
+@app.route("/update", methods=["GET", "POST"])
+def update_table():
+    """ manually update the anniversary dates """
+    data = request.get_json()
+    table_name = data.get("table_name")
+    if not table_name:
+        table_name = "untitled"
+
+    global claimtables
+    try:
+        for c in claimtables:
+            if c.title == table_name:
+                logging.info("Manual update triggered for <%s>", table_name)
+                # process each jurisdiction for the selected table
+                for jurisdiction in c.supported_jurisdictions:
+                    c.update(TableDefinition(), jurisdiction)
+                    c.compaction()
+                return jsonify({"success": True, "message": "Manual update completed."})
+        return jsonify({"success": False, "error": str("Table not found <%s>", table_name)})
+    except Exception as e:
+        logging.error("Manual update failed!")
+        logging.error(e)
+        return jsonify({"success": False, "error": str(e)})
 
 @app.route("/new", methods=["GET", "POST"])
 def new():
@@ -264,10 +288,12 @@ scheduler = None
 def cleanup_on_exit():
     """ application cleanup code """
     print("Caught a shutdown signal... cleanup")
+    logging.debug("Caught a shutdown signal")
     scheduler.stop()
     for c in claimtables:
         c.delete()
     db_engine.dispose()
+    logging.info("Claimtracker process terminated")
 
 atexit.register(cleanup_on_exit)
 
@@ -291,35 +317,29 @@ if __name__ == "__main__":
     try:
         db_engine = sqlalchemy.create_engine(db.connection_string(), pool_pre_ping=True, pool_recycle=3600, \
                                              connect_args={"timeout": 10})
-        conn = db_engine.connect()
-    except exc.SQLAlchemyError as e:
-        logging.critical("FATAL: Unable to connect to the remote server <%s>", db.address)
-        logging.critical(e)
-        sys.exit(1)
-
-    logging.info("Generating table list from database <%s>", db.database)
-    try:
-        conn_lock.acquire()
-        tables_raw = conn.execute(text("SHOW TABLES"))
-        conn_lock.release()
-        if  tables_raw is None:
-            logging.info("No tables in database!")
-            # TODO: we have to exit here, because creating a new table requires _Parcels_Template
-            pass
-        # '_Parcels_Template' and '_Config_Template' are hard-coded, non-rw
-        tables = [t[0] for t in tables_raw if t[0] not in ("_Parcels_Template", "_Config_Template")]
-        suffix = {
-                "config": configuration.get("Tables","config_suffix"),
-                "compact": configuration.get("Tables","compact_suffix")
-        }
-        # Remove the supplementary tables from the list
-        i = 0
-        while i < len(tables):
-            if tables[i].endswith(suffix["config"]) or tables[i].endswith(suffix["compact"]):
-                tables.pop(i)
-            else:
-                i = i + 1
-        logging.debug("Found tables: %s", tables)
+        with db_engine.connect() as conn:
+            conn_lock.acquire()
+            tables_raw = conn.execute(text("SHOW TABLES"))
+            conn_lock.release()
+            if  tables_raw is None:
+                logging.info("No tables in database!")
+                # TODO: we have to exit here, because creating a new table requires _Parcels_Template
+                pass
+            # '_Parcels_Template' and '_Config_Template' are hard-coded, non-rw
+            tables = [t[0] for t in tables_raw if t[0] not in ("_Parcels_Template", "_Config_Template")]
+            suffix = {
+                    "config": configuration.get("Tables","config_suffix"),
+                    "compact": configuration.get("Tables","compact_suffix")
+            }
+            # Remove the supplementary tables from the list
+            i = 0
+            while i < len(tables):
+                if tables[i].endswith(suffix["config"]) or tables[i].endswith(suffix["compact"]):
+                    tables.pop(i)
+                else:
+                    i = i + 1
+            logging.debug("Found tables: %s", tables)
+        logging.info("Generating table list from database <%s>", db.database)
     except exc.SQLAlchemyError as e:
         logging.critical("FATAL: Error fetching data")
         logging.critical(e)
@@ -327,8 +347,14 @@ if __name__ == "__main__":
     finally:
         conn.close()
 
-    logging.info("Connecting with google sheets")
-    gc = pygsheets.authorize(service_file=configuration.get("Credentials","file"))
+    try:
+        logging.info("Connecting with google sheets")
+        gc = pygsheets.authorize(service_file=configuration.get("Credentials","file"))
+        gc.drive.list() # check connection with google by doing an API call
+    except Exception as e:
+        logging.critical("FATAL: Could not connect to Google services.")
+        logging.critical(e)
+        sys.exit(1)
 
     # If the table list is empty, create a new table called 'untitled'
     if not tables:

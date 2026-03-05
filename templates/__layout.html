@@ -281,6 +281,7 @@
         var propertiesCancelButton = document.getElementById("propertiesCancelButton");
         var newTableNameInput = document.getElementById("new_table_name");
 
+        var updateLink = document.querySelector('.header-links a[href="/update"]');
         var newLink = document.querySelector('.header-links a[href="/new"]');
         var deleteLink = document.querySelector('.header-links a[href="/delete"]');
         var renameLink = document.querySelector('.header-links a[href="/rename"]');
@@ -323,6 +324,36 @@
             return regex.test(name);
         }
 
+        if (updateLink) {
+            updateLink.addEventListener('click', function(event) {
+                event.preventDefault();
+                var currentSelectedTable = tableSelect.value;
+                if (!currentSelectedTable) return;
+
+                showLoading();
+
+                fetch('/update', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': '{{ csrf_token }}'
+                    },
+                    body: JSON.stringify({ table_name: currentSelectedTable })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    hideLoading();
+                    if (!data.success) {
+                        alert('Update failed: ' + data.error);
+                    }
+                })
+                .catch(error => {
+                    hideLoading();
+                    console.error('Update Error:', error);
+                    alert('An unexpected error occurred during the update.');
+                });
+            });
+        }
         if (newLink) {
             newLink.addEventListener('click', function(event) {
                 event.preventDefault();
@@ -598,7 +629,7 @@
                 </select>
             </form>
             <div class="header-links">
-                <a href="/properties">Properties</a> | <a href="/new">New</a> | <a href="/rename">Rename</a> | <a href="/delete">Delete</a>
+                <a href="/update">Update</a> | <a href="/properties">Properties</a> | <a href="/new">New</a> | <a href="/rename">Rename</a> | <a href="/delete">Delete</a>
             </div>
         </div>
     <div id="content" class="content">

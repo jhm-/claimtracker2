@@ -193,5 +193,6 @@ class Scheduler(threading.Thread):
     def stop(self):
         try:
             self.stream.close()
+            logging.debug("Scheduling thread, MySQL BinLogStreamReader closed")
         except AttributeError:
             return

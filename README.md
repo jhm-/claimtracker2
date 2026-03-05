@@ -1,6 +1,7 @@
-**Claimtracker2 v. 0.2.1 "Minimum Viable Product"**
+**Claimtracker2 v. 0.2.0 "Minimum Viable Product"**
 
-Requirements: pandas, SQLAlchemy, pygsheets, configparser, pyodbc, bmi-arcgis-restapi, flask_wtf, cron-converter
+Requirements: pandas, SQLAlchemy, pygsheets, configparser, mysql-replication, pyodbc, bmi-arcgis-restapi, flask_wtf,
+              cron-converter
 
 This software has the basic feature set, and a great deal of brittle code. A more exhaustive README will describe the
 software in mode detail, once it achives better stability.
