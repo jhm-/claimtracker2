@@ -136,7 +136,7 @@ class Scheduler(threading.Thread):
         try:
             while True:
                 # updates only in one direction, MySQL->Google Sheet
-                binlogevent = self.stream.fetchone()
+                binlogevent = self.stream.fetchone(blocking=False)
 
                 if binlogevent:
                     t_name = binlogevent.table
