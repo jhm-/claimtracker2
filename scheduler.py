@@ -13,7 +13,7 @@
 # COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
 # OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-from claimtable import claimtables
+#from claimtable import claimtables
 from claimtable import TableDefinition
 import configparser
 import logging
@@ -136,7 +136,16 @@ class Scheduler(threading.Thread):
         try:
             while True:
                 # updates only in one direction, MySQL->Google Sheet
-                binlogevent = self.stream.fetchone(blocking=False)
+                binlogevent = None
+
+                # retrieve one event per iteration
+                try:
+                    binlogevent = next(self.stream)
+                except StopIteration:
+                    binlogevent = None
+                except Exception:
+                    # if it blocks here, fall back to fetchone()
+                    binilogevent = self.stream.fetchone()
 
                 if binlogevent:
                     t_name = binlogevent.table
@@ -144,6 +153,7 @@ class Scheduler(threading.Thread):
                     if isinstance(binlogevent, (DeleteRowsEvent, UpdateRowsEvent, WriteRowsEvent)):
                         pending_syncs[t_name] = time()
 
+                from claimtable import claimtables
                 now = time()
                 ready_to_finalize = [t for t, last_change_time in pending_syncs.items() \
                                      if (now - last_change_time) >= SYNC_DELAY]
@@ -183,7 +193,7 @@ class Scheduler(threading.Thread):
                             logging.error("Error emailing table expiries for <%s>", e)
                         table.email_schedule_iter = table.email_schedule.next()
 
-                sleep(0.2)
+                sleep(0.1)
 
         except exc.SQLAlchemyError:
             logging.critical("FATAL: database connection lost - application shutdown")

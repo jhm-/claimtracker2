@@ -28,6 +28,7 @@ from flask import Flask, render_template, request, redirect, url_for, jsonify
 from flask_wtf.csrf import CSRFProtect, generate_csrf
 from threading import Thread
 from scheduler import Scheduler
+from cron_converter import Cron
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = "claimtracker"
@@ -175,10 +176,29 @@ def index(table_name=None):
                            selected_url=selected_url, property_values=selected_properties, \
                            csrf_token=generate_csrf())
 
+def is_valid_cron(cron_string):
+    """ validates a 5-field cron  string """
+    try:
+        parts = cron_string.split()
+        if len(parts) != 5:
+            return False, "the date must have exactly 5 fields (min hour day month weekday)"
+        Cron(cron_string)
+        return True, None
+    except Exception as e:
+        return False, str(e)
+
 @app.route("/properties", methods=["GET", "POST"])
 def update_properties():
     data = request.get_json()
     table_name = data.get("table_name")
+
+    # validate the dates
+    for label, sched in [("update", data.get("UpdateSched")), ("email", data.get("EmailSched"))]:
+        valid, error = is_valid_cron(sched)
+        if not valid:
+            logging.warning("Invalid %s schedule attempted: %s", label, sched)
+            return jsonify({"success": False, "error": error})
+
     new_properties = {
         "ColumnOrder": [data.get("ColumnOrder")],
         "AccessList": [data.get("AccessList")],

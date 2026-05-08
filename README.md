@@ -1,4 +1,4 @@
-**Claimtracker2 v. 0.2.0 "Minimum Viable Product"**
+**Claimtracker2 v. 0.2.5 "Minimum Viable Product"**
 
 Requirements: pandas, SQLAlchemy, pygsheets, configparser, mysql-replication, pyodbc, bmi-arcgis-restapi, flask_wtf,
               cron-converter
@@ -10,8 +10,8 @@ It is designed to be used in conjunction with QGIS processing algorithms (in pro
 
 Immediate goals: cleanup; better exception handling; Claimtable.update() method external use to application; unit tests
 
-Proximate goal: compaction is not working; validate cron dates
+Proximate goal: compaction is not working
 
-Subsequent: add the final functions to the top bar (update, import); increase portability (from MySQL and QGIS);
+Subsequent: add the final functions to the top bar (import); increase portability (from MySQL and QGIS);
 calendar view for dates in browser; can we get the iframe working?
 (nb. if the iframe works, replace ClaimTable.sheet1.url with ClaimTable.address with the parameter 'rm=minimal' appended)
