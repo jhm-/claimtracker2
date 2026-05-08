@@ -28,13 +28,14 @@ from flask import Flask, render_template, request, redirect, url_for, jsonify
 from flask_wtf.csrf import CSRFProtect, generate_csrf
 from threading import Thread
 from scheduler import Scheduler
+from datetime import datetime
 from cron_converter import Cron
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = "claimtracker"
 csrf = CSRFProtect(app)
 
-version = "0.2.1"
+version = "0.3.0"
 config_path = "claimtracker.conf"
 
 class DbDefinition:
@@ -42,7 +43,7 @@ class DbDefinition:
     password = ""
     address = ""
     trusted_conn = False
-    driver = "{MySQL ODBC 9.2 Unicode Driver}" # modify as neccesary
+    driver = "{MySQL ODBC 9.2 Unicode Driver}" # modify as neccessary
     database = ""
     port = "3306" # default port
 
@@ -162,7 +163,6 @@ def index(table_name=None):
     if request.method == "POST":
         selected_table = request.form.get("table_select")
         if selected_table:
-#            selected_url = table_urls.get(selected_table)
             return redirect(url_for("index", table_name=selected_table))
     else:
         if table_name and table_name in tables:
@@ -170,19 +170,19 @@ def index(table_name=None):
         elif tables:
             selected_table = tables[0]
         if selected_table:
-            selected_url = table_urls.get(selected_table)
+            selected_url = table_urls.get(selected_table) + "?rm=minimal"
             selected_properties = table_properties.get(selected_table, {})
     return render_template("__layout.html", tables=tables, selected_table=selected_table, \
                            selected_url=selected_url, property_values=selected_properties, \
                            csrf_token=generate_csrf())
 
 def is_valid_cron(cron_string):
-    """ validates a 5-field cron  string """
+    """ validates a 5-field cron string, including impossible dates """
     try:
         parts = cron_string.split()
         if len(parts) != 5:
             return False, "the date must have exactly 5 fields (min hour day month weekday)"
-        Cron(cron_string)
+        Cron(cron_string).schedule(datetime.now()).next()
         return True, None
     except Exception as e:
         return False, str(e)
@@ -213,7 +213,8 @@ def update_properties():
             if c.title == table_name:
                 c.update_config(new_properties)
     except Exception as e:
-        logging.error("Error updating properties for table: %s", e)
+        logging.error("Error updating properties for table <%s>", table_name)
+        logging.error(e)
         return jsonify({"success": False, "error": str(e)})
     return jsonify({"success": True, "message": "Properties updated"})
 
@@ -233,7 +234,7 @@ def update_table():
                 # process each jurisdiction for the selected table
                 for jurisdiction in c.supported_jurisdictions:
                     c.update(TableDefinition(), jurisdiction)
-                    c.compaction()
+                c.compaction()
                 return jsonify({"success": True, "message": "Manual update completed."})
         return jsonify({"success": False, "error": str("Table not found <%s>", table_name)})
     except Exception as e:

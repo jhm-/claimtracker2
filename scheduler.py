@@ -13,10 +13,11 @@
 # COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
 # OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-#from claimtable import claimtables
 from claimtable import TableDefinition
 import configparser
 import logging
+import os
+import signal
 import threading
 from datetime import datetime, timedelta
 import pandas as pd
@@ -102,22 +103,18 @@ class Scheduler(threading.Thread):
         email_account = self.configuration.get("Emailer", "email_account")
         email_password = self.configuration.get("Emailer", "email_password")
 
-        message = MIMEMultipart("alternative")
-        message["Subject"] = "Claimtracker update: " + table_name
-        message["From"] = email_account
-
-        for r in recipients:
-            message["To"] = r
-            # replace user placeholder with the recipients email address
-            send_html = email_html.replace("{{ user }}", r)
-            message.attach(MIMEText(send_html, "html"))
-
-        # exceptions are caught at a higher level
         with smtplib.SMTP(smtp_server, 587) as server:
             server.starttls()
             server.login(email_account, email_password)
-            server.sendmail(email_account, recipients, message.as_string())
-            logging.info(table_name + ": email successfuly sent to recipient " + r)
+            for r in recipients:
+                message = MIMEMultipart("alternative")
+                message["Subject"] = "Claimtracker update: " + table_name
+                message["From"] = email_account
+                message["To"] = r
+                send_html = email_html.replace("{{ user }}", r)
+                message.attach(MIMEText(send_html, "html"))
+                server.sendmail(email_account, r, message.as_string())
+                logging.info(table_name + ": email successfully sent to recipient " + r)
 
     def run(self):
         db = {
@@ -145,7 +142,7 @@ class Scheduler(threading.Thread):
                     binlogevent = None
                 except Exception:
                     # if it blocks here, fall back to fetchone()
-                    binilogevent = self.stream.fetchone()
+                    binlogevent = self.stream.fetchone()
 
                 if binlogevent:
                     t_name = binlogevent.table
@@ -176,7 +173,7 @@ class Scheduler(threading.Thread):
                     if not table.update_schedule_iter:
                         continue
                     if table.update_schedule_iter <= now:
-                        logging.info("Launching scheduled updater for <%s>", str(table.title))
+                        logging.info("Launching scheduled updater for <%s>", table.title)
                         for jurisdiction in table.supported_jurisdictions:
                             table.update(TableDefinition(), jurisdiction)
                         table.compaction()
@@ -184,13 +181,14 @@ class Scheduler(threading.Thread):
                     if not table.email_schedule_iter:
                         continue
                     if table.email_schedule_iter <= now:
-                        logging.info("Launching scheduled emailer for <%s>", str(table.title))
+                        logging.info("Launching scheduled emailer for <%s>", table.title)
                         try:
                             recipients = table.access_list
                             email_html = self.prepare_email(table)
                             self.send_email(recipients, str(table.title), email_html)
                         except Exception as e:
-                            logging.error("Error emailing table expiries for <%s>", e)
+                            logging.error("Error emailing table expiries for <%s>", table.title)
+                            logging.error(e)
                         table.email_schedule_iter = table.email_schedule.next()
 
                 sleep(0.1)

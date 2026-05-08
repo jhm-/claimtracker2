@@ -20,6 +20,7 @@ import sys
 import time
 from cron_converter import Cron
 from sqlalchemy import func, text, exc
+from sqlalchemy.dialects.mysql import insert
 from threading import Lock
 import arcweb_data
 from datetime import datetime
@@ -43,17 +44,6 @@ class TableDefinition:
                      "NextDueDate"]
     column_map = dict()
 
-def mysql_replace_into(table, conn, keys, data_iter):
-    """ custom to_sql method to INSERT... ON DUPLICATE KEY UPDATE... """
-    from sqlalchemy.dialects.mysql import insert
-
-    data = [dict(zip(keys, row)) for row in data_iter]
-
-    stmt = insert(table.table).values(data)
-    update_stmt = stmt.on_duplicate_key_update(**dict(zip(stmt.inserted.keys(), 
-                                               stmt.inserted.values())))
-    conn.execute(update_stmt)
-
 class ClaimTable(pygsheets.Spreadsheet):
     """ the claimtable class is an extended class from pygsheets, with added functions to load Spreadsheet data from
         MySQL, update tenure expiry dates, modify rows on the Spreadsheet, and more... """
@@ -68,6 +58,11 @@ class ClaimTable(pygsheets.Spreadsheet):
                                         "BC": arcweb_data.get_data_BC}
         if load_config:
             self.load_config()
+
+    def _write_dataframe(self, wks, df, start=(1,1), fit=True, copy_head=True):
+        """ writes a dataframe to a worksheet, replacing NaN and NaT with empty strings """
+        wks.set_dataframe(df.astype(object).fillna("").infer_objects(copy=False), 
+                          start, encoding="utf-8", fit=fit, copy_head=copy_head)
 
     def load_config(self):
         """ load the configuration SQL table that is linked to the claimtable, and update table-specific settings  """
@@ -173,8 +168,9 @@ class ClaimTable(pygsheets.Spreadsheet):
 
     def new(self):
         """ generate a new table to store tenure data in the SQL database, and a table of associated configuration
-            settings, by coping the column information from templates """
+            settings, by copying the column information from templates """
         df = pd.DataFrame()
+        success = False
         query = "DROP TABLE IF EXISTS " + self.title + ";" + \
                     "CREATE TABLE " + self.title + " LIKE _Parcels_Template;" + \
                     "ALTER TABLE " + self.title + " ADD INDEX NextDueDate (NextDueDate);" + \
@@ -192,17 +188,21 @@ class ClaimTable(pygsheets.Spreadsheet):
                     conn.execute(text(q))
                 query = "SELECT * FROM " + self.title
                 df = pd.read_sql(text(query), con=conn) # Put the columns into the dataframe
+            success = True
         except exc.SQLAlchemyError as e:
             logging.error("Unable to create new table <%s>", self.title)
             logging.error(e)
         finally:
             conn_lock.release()
 
+        if not success:
+            return
+
         self.load_config()
 
         # re-order columns
         df = df[self.column_order + [c for c in df.columns if c not in self.column_order]]
-        self.sheet1.set_dataframe(df, (1,1), encoding="utf-8", fit=True)
+        self._write_dataframe(self.sheet1, df)
         # can't freeze rows when there's only one row
         # self.sheet1.frozen_rows = 1
         self.sheet1.link()
@@ -267,6 +267,15 @@ class ClaimTable(pygsheets.Spreadsheet):
 
     def update(self, inTable: TableDefinition, jurisdiction: str, RegTitleNumber=None):
         """ update the tenure information by polling the appropriate ArcGIS REST API (see arcweb_data.py) """
+
+        def mysql_replace_into(table, conn, keys, data_iter):
+            """ custom to_sql method to INSERT... ON DUPLICATE KEY UPDATE... """
+            data = [dict(zip(keys, row)) for row in data_iter]
+            stmt = insert(table.table).values(data)
+            update_stmt = stmt.on_duplicate_key_update(**dict(zip(stmt.inserted.keys(),
+                                                                  stmt.inserted.values())))
+            conn.execute(update_stmt)
+
         if jurisdiction in self.supported_jurisdictions:
             data_func = self.supported_jurisdictions[jurisdiction]
         else:
@@ -279,6 +288,7 @@ class ClaimTable(pygsheets.Spreadsheet):
         if not inTable.jurisdictionCol:
             inTable.jurisdictionCol = "Jurisdiction"
 
+        rows = []
         conn_lock.acquire()
         try:
             with self.engine.connect() as conn:
@@ -320,9 +330,16 @@ class ClaimTable(pygsheets.Spreadsheet):
             tenure_data = data_func(tenure_list[start:end])
 
             for t in tenure_data:
-                t["ProjectName"] = project_list[tenure_list.index(t["RegTitleNumber"])]
+                try:
+                    idx = tenure_list.index(t["RegTitleNumber"])
+                except ValueError:
+                    logging.warning("Received unexpected RegTtleNumber <%s> from API for table <%s>, skipping",
+                                    t["RegTitleNumber"], self.title)
+                    continue
+
+                t["ProjectName"] = project_list[idx]
                 t["Jurisdiction"] = jurisdiction
-                t["Comments"] = comment_list[tenure_list.index(t["RegTitleNumber"])]
+                t["Comments"] = comment_list[idx]
                 t["UpdateDate"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 df = pd.DataFrame([t])
 
@@ -356,7 +373,7 @@ class ClaimTable(pygsheets.Spreadsheet):
         address = (cell[0].address[0], 0)
         # re-order columns
         df_after = df_after[self.column_order + [c for c in df_after.columns if c not in self.column_order]]
-        self.sheet1.set_dataframe(df_after, address, encoding="utf-8", copy_head=False)
+        self._write_dataframe(self.sheet1, df_after, start=address, fit=False, copy_head=False)
 
     def del_parcel(self, df):
         """ delete a row in the claimtable """
@@ -386,7 +403,7 @@ class ClaimTable(pygsheets.Spreadsheet):
 
         if not df.empty:
             df = df[self.column_order + [c for c in df.columns if c not in self.column_order]]
-            self.sheet1.set_dataframe(df, (1,1), encoding="utf-8", fit=True)
+            self._write_dataframe(self.sheet1, df)
 
     def load(self):
         """ update expiry dates, load MySQL table into ClaimTable object, run compaction, link with cloud """
@@ -399,14 +416,14 @@ class ClaimTable(pygsheets.Spreadsheet):
                 df = pd.read_sql(text(query), con=conn)
         except exc.SQLAlchemyError as e:
             logging.critical("FATAL: unable to read table <%s> into dataframe", self.title)
-            logging.critcal(e)
+            logging.critical(e)
             sys.exit(1)
         finally:
             conn_lock.release()
 
         # re-order columns
         df = df[self.column_order + [c for c in df.columns if c not in self.column_order]]
-        self.sheet1.set_dataframe(df, (1,1), encoding="utf-8", fit=True)
+        self._write_dataframe(self.sheet1, df)
         self.sheet1.frozen_rows = 1
         self.sheet1.link()
 
@@ -441,7 +458,11 @@ class ClaimTable(pygsheets.Spreadsheet):
                 conn_lock.release()
 
             # drop and re-order google sheet
-            df = df.drop(columns=["Area_ha", "TitleNumberDistance"])
-            df = df[self.compact_order + [c for c in df.columns if c not in self.compact_order]]
-            self.compact_wks.set_dataframe(df, (1,1), encoding="utf-8", fit=True)
-            self.compact_wks.frozen_rows = 1
+            try:
+                df = df.drop(columns=["TitleNumberDistance"])
+                df = df[self.compact_order + [c for c in df.columns if c not in self.compact_order]]
+                self._write_dataframe(self.compact_wks, df)
+                self.compact_wks.frozen_rows = 1
+            except Exception as e:
+                logging.error("Unable to update compaction worksheet for <%s>", self.title)
+                logging.error(e)
