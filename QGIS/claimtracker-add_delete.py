@@ -18,51 +18,53 @@ from qgis.core import (QgsProcessing,
                        QgsProcessingAlgorithm,
                        QgsProcessingParameterString,
                        QgsProcessingParameterEnum,
-                       QgsMapLayerType,
-                       QgsAuthManager)
+                       QgsProcessingParameterAuthConfig,
+                       QgsAuthMethodConfig,
+                       QgsMapLayerType)
 import mysql.connector
 
 class ClaimTrackerSyncTenuresTool(QgsProcessingAlgorithm):
-    TABLE_NAME = "TABLE_NAME"
-    DB_HOST = "DB_HOST"
-    DB_USER = "DB_USER"
-    DB_PASS = "DB_PASS"
-    DB_NAME = "DB_NAME"
-    JURISDICTION = "JURISDICTION"
     MODE = "MODE"
+    TABLE_NAME = "TABLE_NAME"
+    JURISDICTION = "JURISDICTION"
+    AUTH_CONFIG = "AUTH_CONFIG"
 
-    def name(self): return "sync_claimtracker_claims"
-    def displayName(self): return "Add/Delete Mineral Tenures"
+    JURISDICTION_FIELD_MAP = {
+        "YK":  "GRANT_NUM",
+        "NWT": "CLAIM_NUM",
+        "NU":  "CLAIM_NUM",
+        "NV":  "SERIALNUMB",
+        "BC":  "TENURE_NUMBER_ID"
+    }
+
+    def name(self): return "sync_tenures"
+    def displayName(self): return "Add or Delete Tenures"
     def group(self): return "Claimtracker: Mineral Tenure Tracking"
     def groupId(self): return "claimtracker"
     def createInstance(self): return ClaimTrackerSyncTenuresTool()
 
     def initAlgorithm(self, config=None):
-        self.addParameter(QgsProcessingParameterEnum(
-            self.MODE, 
-            "Action to perform", 
-            options=["Add selected to Project", "Delete selected from Project"], 
-            defaultValue=0))
-
-        # TODO: use QGis Authenticator or some other method to save the default parameters
-        self.addParameter(QgsProcessingParameterString(self.DB_HOST, "Database Host", defaultValue="[database host]"))
-        self.addParameter(QgsProcessingParameterString(self.DB_NAME, "Database Name", defaultValue="[database name]"))
-        self.addParameter(QgsProcessingParameterString(self.DB_USER, "Username", defaultValue="[user name]"))
-        self.addParameter(QgsProcessingParameterString(self.DB_PASS, "Password", defaultValue="[password]"))
-        self.addParameter(QgsProcessingParameterString(self.TABLE_NAME, "Claim Table", defaultValue="[table name]"))
-        self.addParameter(QgsProcessingParameterString(self.JURISDICTION, "Jurisdiction (e.g. YK)", defaultValue="[jurisdiction]"))
+        self.addParameter(QgsProcessingParameterEnum(self.MODE, "Mode", options=["Add", "Delete"], defaultValue=0))
+        self.addParameter(QgsProcessingParameterString(self.TABLE_NAME, "Claim Table", defaultValue=""))
+        self.addParameter(QgsProcessingParameterString(self.JURISDICTION, "Jurisdiction (e.g. YK)", defaultValue="YK"))
+        self.addParameter(QgsProcessingParameterAuthConfig(self.AUTH_CONFIG, "Database Credentials"))
 
     def processAlgorithm(self, parameters, context, feedback):
         from qgis.utils import iface
+        from qgis.core import QgsApplication
 
-        # get parameter values
         mode_index = self.parameterAsEnum(parameters, self.MODE, context)
-        host = self.parameterAsString(parameters, self.DB_HOST, context)
-        db_name = self.parameterAsString(parameters, self.DB_NAME, context)
-        user = self.parameterAsString(parameters, self.DB_USER, context)
-        pw = self.parameterAsString(parameters, self.DB_PASS, context)
         table = self.parameterAsString(parameters, self.TABLE_NAME, context)
         jur = self.parameterAsString(parameters, self.JURISDICTION, context)
+
+        auth_config_id = self.parameterAsString(parameters, self.AUTH_CONFIG, context)
+        auth_manager = QgsApplication.authManager()
+        conf = QgsAuthMethodConfig()
+        auth_manager.loadAuthenticationConfig(auth_config_id, conf, True)
+        user = conf.config("username")
+        pw = conf.config("password")
+        host = conf.uri()
+        db_name = conf.config("realm")
 
         layer = iface.activeLayer()
         if not layer:
@@ -74,27 +76,34 @@ class ClaimTrackerSyncTenuresTool(QgsProcessingAlgorithm):
             feedback.pushInfo("No features selected. Nothing to do.")
             return {"STATUS": "No Selection"}
 
-        parcels = [(str(f.attribute(1)),) for f in features]
+        tenure_field = self.JURISDICTION_FIELD_MAP.get(jur)
+        if not tenure_field:
+            feedback.reportError(f"CRITICAL: Unknown jurisdiction '{jur}'. Cannot determine tenure ID field.")
+            return {"STATUS": "Unknown Jurisdiction"}
+
+        parcels = [(str(f.attribute(tenure_field)),) for f in features]
 
         try:
             cnx = mysql.connector.connect(host=host, database=db_name, user=user, password=pw, connect_timeout=5)
             if cnx.is_connected():
                 cur = cnx.cursor()
 
-                if mode_index == 0: # add mode
+                if mode_index == 0:  # add mode
                     feedback.pushInfo(f"Adding {len(parcels)} claims...")
                     query = f"INSERT IGNORE INTO {table} (RegTitleNumber) VALUES (%s)"
                     cur.executemany(query, parcels)
-                    setjur = f"UPDATE {table} SET JURISDICTION = %s WHERE JURISDICTION IS NULL"
+                    # set jurisdiction for new records only
+                    setjur = f"UPDATE {table} SET Jurisdiction = %s WHERE Jurisdiction IS NULL"
                     cur.execute(setjur, (jur,))
 
-                else: # delete mode
+                else:  # delete mode
                     feedback.pushInfo(f"Deleting {len(parcels)} claims...")
                     query = f"DELETE FROM {table} WHERE RegTitleNumber = %s"
                     cur.executemany(query, parcels)
 
                 cnx.commit()
                 feedback.pushInfo(f"Successfully processed {len(parcels)} records in MySQL.")
+
         except Exception as e:
             feedback.reportError(f"DATABASE ERROR: {e}")
         finally:
@@ -106,10 +115,9 @@ class ClaimTrackerSyncTenuresTool(QgsProcessingAlgorithm):
 
     def postProcessAlgorithm(self, context, feedback):
         from qgis.utils import iface
-        from qgis.core import QgsMapLayerTyp
+        from qgis.core import QgsMapLayerType
 
         feedback.pushInfo("Refreshing Viewport Symbology...")
-
         active_layer = iface.activeLayer()
         if active_layer:
             active_layer.removeSelection()

@@ -140,9 +140,16 @@ class Scheduler(threading.Thread):
                     binlogevent = next(self.stream)
                 except StopIteration:
                     binlogevent = None
-                except Exception:
+                except Exception as e:
                     # if it blocks here, fall back to fetchone()
-                    binlogevent = self.stream.fetchone()
+                    logging.warning("BinLog steam read failed, falling back to fetchone()")
+                    logging.warning(e)
+                    try:
+                        binlogevent = self.stream.fetchone()
+                    except Exception as e:
+                        logging.error("BingLog stream fetchone() also failed - skipping event")
+                        logging.error(e)
+                        binlogevent = None
 
                 if binlogevent:
                     t_name = binlogevent.table
@@ -195,6 +202,11 @@ class Scheduler(threading.Thread):
 
         except exc.SQLAlchemyError:
             logging.critical("FATAL: database connection lost - application shutdown")
+            os.kill(os.getpid(), signal.SIGTERM)
+            self.stop()
+        except Exception as e:
+            logging.critical("FATAL: unexpected error in scheduler thread - application shutdown")
+            logging.critical(e)
             os.kill(os.getpid(), signal.SIGTERM)
             self.stop()
 

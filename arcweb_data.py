@@ -32,12 +32,14 @@ def get_data_NWT(tenure_list):
             "GROUP_NUMBER", "ISSUE_DT", "LAND_CLAIM_AREA", "OWNERS"]
     data = get_data(url, service_url, layer, tenure_list, tenure_filter_col, cols)
     data = [{
-        "RegDate": datetime.fromtimestamp(d["ISSUE_DT"]/1000),
+        "RegDate": datetime.fromtimestamp(d["ISSUE_DT"]/1000)
+            if d["ISSUE_DT"] and d["ISSUE_DT"] > 0 else datetime(1970, 1, 1),
         "Owner": d["OWNERS"],
         "Area_ha": d["AREA_HA"],
         "ParcelName": d["CLAIM_NAME"],
         "RegTitleNumber": d["CLAIM_NUM"],
         "NextDueDate": datetime.fromtimestamp(d["ANNIV_DT"]/1000)
+            if d["ANNIV_DT"] and d["ANNIV_DT"] > 0 else datetime(1970, 1, 1)
     } for d in data]
     return data
 
@@ -129,7 +131,7 @@ def get_data_NU(tenure_list):
     return data
 
 def get_data(base_url, service_url, layer, tenure_list, tenure_filter_col, out_cols=None, batch_size=25):
-    """ wrapper for get_data_slice that iterates data retrieval through a list of tenures, and uses sleep(0.1) to not
+    """ wrapper for get_data_slice that iterates data retrieval through a list of tenures, and uses sleep(0.4) to not
         overload the server """
     start = 0
     results = list()
@@ -140,7 +142,7 @@ def get_data(base_url, service_url, layer, tenure_list, tenure_filter_col, out_c
 
         results = results + get_data_slice(base_url, service_url, layer, tenure_list[start:end], tenure_filter_col, out_cols)
         start = start + batch_size
-        time.sleep(0.1)
+        time.sleep(0.4)
 
     return results
 

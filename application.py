@@ -35,7 +35,7 @@ app = Flask(__name__)
 app.config["SECRET_KEY"] = "claimtracker"
 csrf = CSRFProtect(app)
 
-version = "0.3.0"
+version = "0.3.2"
 config_path = "claimtracker.conf"
 
 class DbDefinition:
@@ -310,10 +310,19 @@ def cleanup_on_exit():
     """ application cleanup code """
     print("Caught a shutdown signal... cleanup")
     logging.debug("Caught a shutdown signal")
-    scheduler.stop()
+    try:
+        scheduler.stop()
+    except Exception as e:
+        logging.error("Error stopping scheduler during cleanup: %s", e)
     for c in claimtables:
-        c.delete()
-    db_engine.dispose()
+        try:
+            c.delete()
+        except Exception as e:
+            logging.error("Error deleting table <%s> during cleanup: %s", c.title, e)
+    try:
+        db_engine.dispose()
+    except Exception as e:
+        logging.error("Error disposing database engine during cleanup: %s", e)
     logging.info("Claimtracker process terminated")
 
 atexit.register(cleanup_on_exit)

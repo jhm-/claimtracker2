@@ -1,4 +1,4 @@
-**Claimtracker2 v. 0.3.0 "Minimum Viable Product"**
+**Claimtracker2 v. 0.3.2 "Minimum Viable Product"**
 
 Requirements: pandas, SQLAlchemy, pygsheets, configparser, mysql-replication, pyodbc, bmi-arcgis-restapi, flask_wtf,
               cron-converter

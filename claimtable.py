@@ -90,15 +90,20 @@ class ClaimTable(pygsheets.Spreadsheet):
                 self.email_schedule_iter = self.email_schedule.next()
                 # google sheet column order
                 column_order = df["ColumnOrder"].iloc[0]
-                self.column_order = column_order.split(";")
+                self.column_order = [c.strip() for c in column_order.split(";")]
+                if len(self.column_order) < 2:
+                    logging.warning("ColumnOrder for <%s> has fewer than 2 columns, check configuration", self.title)
                 compact_order = df["CompactColumnOrder"].iloc[0]
-                self.compact_order = compact_order.split(";")
+                self.compact_order = [c.strip() for c in compact_order.split(";")]
+                if self.compact and len(self.compact_order) < 2:
+                    logging.warning("CompactColumnOrder for <%s> has fewer than 2 columns, check configuration", \
+                                    self.title)
                 # pruning (remove expired claims) and compactions flags
                 self.prune = df["Prune"].iloc[0]
                 self.compact = df["Compact"].iloc[0]
                 # google sheet access list (emails)
                 access_list = df["AccessList"].iloc[0]
-                self.access_list = access_list.split(";")
+                self.access_list = [r.strip() for r in access_list.split(";")]
                 for email in self.access_list:
                    self.share(email, role="reader", type="user")
             except Exception as e:
@@ -318,54 +323,40 @@ class ClaimTable(pygsheets.Spreadsheet):
             comment_list.append(r[2])
 
         # TODO: pop this next bit of code out (minus SQL) as a class method for use outside of a Claimtable object
+        tenure_data = data_func(tenure_list)
 
-        i = 0
-        start = 0
-        batch_size = 25
-        while start < len(tenure_list):
-            end = start + batch_size
-            if end > len(tenure_list):
-                end = len(tenure_list)
+        for t in tenure_data:
+            try:
+                idx = tenure_list.index(t["RegTitleNumber"])
+            except ValueError:
+                logging.warning("Received unexpected RegTitleNumber <%s> from API for table <%s>, skipping",
+                                t["RegTitleNumber"], self.title)
+                continue
 
-            tenure_data = data_func(tenure_list[start:end])
+            t["ProjectName"] = project_list[idx]
+            t["Jurisdiction"] = jurisdiction
+            t["Comments"] = comment_list[idx]
+            t["UpdateDate"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            df = pd.DataFrame([t])
 
-            for t in tenure_data:
-                try:
-                    idx = tenure_list.index(t["RegTitleNumber"])
-                except ValueError:
-                    logging.warning("Received unexpected RegTtleNumber <%s> from API for table <%s>, skipping",
-                                    t["RegTitleNumber"], self.title)
-                    continue
-
-                t["ProjectName"] = project_list[idx]
-                t["Jurisdiction"] = jurisdiction
-                t["Comments"] = comment_list[idx]
-                t["UpdateDate"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                df = pd.DataFrame([t])
-
-                conn_lock.acquire()
-                try:
-                    with self.engine.connect() as conn:
-                        # 'prune' ie. remove expired 
-                        if self.prune:
-                            for index, row in df.iterrows():
-                                if row["NextDueDate"] < datetime.now():
-                                    logging.debug("Drop parcel <%s> where NextDueDate < datetime.now", \
-                                                  row["RegTitleNumber"])
-                                    conn.execute(text("DELETE FROM " + self.title + " WHERE RegTitleNumber=\"" + \
-                                                 row["RegTitleNumber"] + "\""))
-                                    df = df.drop(index)
-                        if not df.empty:
-                            df.to_sql(self.title, conn, index=False, if_exists="append", method=mysql_replace_into)
-                except exc.SQLAlchemyError as e:
-                    logging.error("Error updating expiry dates for table <%s>", self.title)
-                    logging.error(e)
-                finally:
-                    conn_lock.release()
-                i = i + 1
-
-            time.sleep(0.1)
-            start = start + batch_size
+            conn_lock.acquire()
+            try:
+                with self.engine.connect() as conn:
+                   if self.prune:
+                        for index, row in df.iterrows():
+                            if row["NextDueDate"] < datetime.now():
+                                logging.debug("Drop parcel <%s> where NextDueDate < datetime.now", \
+                                              row["RegTitleNumber"])
+                                conn.execute(text("DELETE FROM " + self.title + " WHERE RegTitleNumber=\"" + \
+                                             row["RegTitleNumber"] + "\""))
+                                df = df.drop(index)
+                    if not df.empty:
+                        df.to_sql(self.title, conn, index=False, if_exists="append", method=mysql_replace_into)
+            except exc.SQLAlchemyError as e:
+                logging.error("Error updating expiry dates for table <%s>", self.title)
+                logging.error(e)
+            finally:
+                conn_lock.release()
 
     def modify_parcel(self, df_before, df_after):
         """ modify a row in the claimtable """

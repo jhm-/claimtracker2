@@ -12,20 +12,29 @@
 # WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
 # COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
 # OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
 from qgis.PyQt.QtCore import QCoreApplication
 from qgis.core import (QgsProcessing,
                        QgsProcessingAlgorithm,
                        QgsProcessingParameterString,
+                       QgsProcessingParameterAuthConfig,
+                       QgsAuthMethodConfig,
                        QgsMapLayerType)
 import mysql.connector
 
 class ClaimTrackerAssignProjectTool(QgsProcessingAlgorithm):
     PROJECT_NAME = "PROJECT_NAME"
-    DB_HOST = "DB_HOST"
-    DB_USER = "DB_USER"
-    DB_PASS = "DB_PASS"
-    DB_NAME = "DB_NAME"
     TABLE_NAME = "TABLE_NAME"
+    JURISDICTION = "JURISDICTION"
+    AUTH_CONFIG = "AUTH_CONFIG"
+
+    JURISDICTION_FIELD_MAP = {
+        "YK":  "GRANT_NUM",
+        "NWT": "CLAIM_NUM",
+        "NU":  "CLAIM_NUM",
+        "NV":  "SERIALNUMB",
+        "BC":  "TENURE_NUMBER_ID"
+    }
 
     def name(self): return "assign_tenures_to_project"
     def displayName(self): return "Assign Tenures to Project"
@@ -34,31 +43,44 @@ class ClaimTrackerAssignProjectTool(QgsProcessingAlgorithm):
     def createInstance(self): return ClaimTrackerAssignProjectTool()
 
     def initAlgorithm(self, config=None):
-        # TODO: use QGis Authenticator or some other method to save the default parameters
-        self.addParameter(QgsProcessingParameterString(self.PROJECT_NAME, "Project Name to Assign", defaultValue="[project name]"))
-        self.addParameter(QgsProcessingParameterString(self.DB_HOST, "Database Host", defaultValue="[database host]"))
-        self.addParameter(QgsProcessingParameterString(self.DB_NAME, "Database Name", defaultValue="[database name]"))
-        self.addParameter(QgsProcessingParameterString(self.DB_USER, "Username", defaultValue="[database]"))
-        self.addParameter(QgsProcessingParameterString(self.DB_PASS, "Password", defaultValue="[password]"))
-        self.addParameter(QgsProcessingParameterString(self.TABLE_NAME, "Claim Table", defaultValue="[table name]"))
+        self.addParameter(QgsProcessingParameterString(self.PROJECT_NAME, "Project Name to Assign", defaultValue=""))
+        self.addParameter(QgsProcessingParameterString(self.TABLE_NAME, "Claim Table", defaultValue=""))
+        self.addParameter(QgsProcessingParameterString(self.JURISDICTION, "Jurisdiction (e.g. YK)", defaultValue="YK"))
+        self.addParameter(QgsProcessingParameterAuthConfig(self.AUTH_CONFIG, "Database Credentials"))
 
     def processAlgorithm(self, parameters, context, feedback):
         from qgis.utils import iface
+        from qgis.core import QgsApplication
 
         project = self.parameterAsString(parameters, self.PROJECT_NAME, context)
-        host = self.parameterAsString(parameters, self.DB_HOST, context)
-        db_name = self.parameterAsString(parameters, self.DB_NAME, context)
-        user = self.parameterAsString(parameters, self.DB_USER, context)
-        pw = self.parameterAsString(parameters, self.DB_PASS, context)
         table = self.parameterAsString(parameters, self.TABLE_NAME, context)
+        jur = self.parameterAsString(parameters, self.JURISDICTION, context)
+
+        auth_config_id = self.parameterAsString(parameters, self.AUTH_CONFIG, context)
+        auth_manager = QgsApplication.authManager()
+        conf = QgsAuthMethodConfig()
+        auth_manager.loadAuthenticationConfig(auth_config_id, conf, True)
+        user = conf.config("username")
+        pw = conf.config("password")
+        host = conf.uri()
+        db_name = conf.config("realm")
 
         layer = iface.activeLayer()
-        if not layer: return {"STATUS": "No Layer"}
+        if not layer:
+            feedback.reportError("CRITICAL: No active layer found.")
+            return {"STATUS": "No Layer"}
 
         features = layer.selectedFeatures()
-        if not features: return {"STATUS": "No Selection"}
+        if not features:
+            feedback.pushInfo("No features selected. Nothing to do.")
+            return {"STATUS": "No Selection"}
 
-        selected_ids = [str(f.attribute(1)) for f in features]
+        tenure_field = self.JURISDICTION_FIELD_MAP.get(jur)
+        if not tenure_field:
+            feedback.reportError(f"CRITICAL: Unknown jurisdiction '{jur}'. Cannot determine tenure ID field.")
+            return {"STATUS": "Unknown Jurisdiction"}
+
+        selected_ids = [str(f.attribute(tenure_field)) for f in features]
 
         try:
             cnx = mysql.connector.connect(host=host, database=db_name, user=user, password=pw, connect_timeout=5)
@@ -67,7 +89,7 @@ class ClaimTrackerAssignProjectTool(QgsProcessingAlgorithm):
             # safety: check which of these IDs actually exist in the database
             format_strings = ",".join(["%s"] * len(selected_ids))
             check_query = f"SELECT RegTitleNumber FROM {table} WHERE RegTitleNumber IN ({format_strings})"
-            cur.execute(check_query, tuple(selected_ids)
+            cur.execute(check_query, tuple(selected_ids))
 
             existing_ids = [row[0] for row in cur.fetchall()]
             missing_ids = list(set(selected_ids) - set(existing_ids))
@@ -78,17 +100,16 @@ class ClaimTrackerAssignProjectTool(QgsProcessingAlgorithm):
                     feedback.pushInfo(f"Missing ID: {m_id}")
 
             if not existing_ids:
-                feedback.reportError("Aborting: None of the selected claims exist in the database. Use the "Add" tool first.")
+                feedback.reportError("Aborting: None of the selected claims exist in the database. Use the 'Add' tool first.")
                 return {"STATUS": "Failed Safety Check"}
 
             # only update the ones that exist
             update_data = [(project, x) for x in existing_ids]
             update_query = f"UPDATE {table} SET ProjectName = %s WHERE RegTitleNumber = %s"
-
             cur.executemany(update_query, update_data)
             cnx.commit()
 
-            feedback.pushInfo(f"SUCCESS: Assigned {len(existing_ids)} claims to project "{project}".")
+            feedback.pushInfo(f"SUCCESS: Assigned {len(existing_ids)} claims to project '{project}'.")
 
         except Exception as e:
             feedback.reportError(f"DATABASE ERROR: {e}")
@@ -103,6 +124,7 @@ class ClaimTrackerAssignProjectTool(QgsProcessingAlgorithm):
         from qgis.utils import iface
         from qgis.core import QgsMapLayerType
 
+        feedback.pushInfo("Refreshing Viewport Symbology...")
         active_layer = iface.activeLayer()
         if active_layer:
             active_layer.removeSelection()
@@ -113,4 +135,5 @@ class ClaimTrackerAssignProjectTool(QgsProcessingAlgorithm):
                 layer.triggerRepaint()
 
         iface.mapCanvas().refresh()
+        feedback.pushInfo("Map updated successfully.")
         return {"STATUS": "Success"}
