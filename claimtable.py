@@ -12,7 +12,6 @@
 # WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
 # COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
 # OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-
 import logging
 import pygsheets
 import pandas as pd
@@ -23,9 +22,6 @@ from sqlalchemy.dialects.mysql import insert
 from threading import Lock
 import arcweb_data
 from datetime import datetime
-
-global conn_lock
-conn_lock = Lock() # connection is shared among Claimtable objects, so prevent a race condition
 
 global claimtables
 claimtables = []
@@ -52,6 +48,7 @@ class ClaimTable(pygsheets.Spreadsheet):
         self.suffix = suffix
         self.sheet1.title = self.title
         self.compact_wks = None # compacted worksheet placeholder
+        self.conn_lock = Lock() # per-table lock to prevent race conditions on the database connection
         self.supported_jurisdictions = {"YK": arcweb_data.get_data_YK, "NWT": arcweb_data.get_data_NWT, \
                                         "NU": arcweb_data.get_data_NU, "NV": arcweb_data.get_data_NV, \
                                         "BC": arcweb_data.get_data_BC}
@@ -60,7 +57,7 @@ class ClaimTable(pygsheets.Spreadsheet):
 
     def _write_dataframe(self, wks, df, start=(1,1), fit=True, copy_head=True):
         """ writes a dataframe to a worksheet, replacing NaN and NaT with empty strings """
-        wks.set_dataframe(df.astype(object).fillna("").infer_objects(copy=False), 
+        wks.set_dataframe(df.astype(object).fillna("").infer_objects(copy=False),
                           start, encoding="utf-8", fit=fit, copy_head=copy_head)
 
     def load_config(self):
@@ -68,7 +65,7 @@ class ClaimTable(pygsheets.Spreadsheet):
         df = pd.DataFrame()
         query = "SELECT * FROM " + self.title + self.suffix["config"]
 
-        conn_lock.acquire()
+        self.conn_lock.acquire()
         try:
             with self.engine.connect() as conn:
                 df = pd.read_sql(text(query), con=conn)
@@ -76,7 +73,7 @@ class ClaimTable(pygsheets.Spreadsheet):
             logging.error("Unable to read table <%s> into dataframe", self.title)
             logging.error(e)
         finally:
-            conn_lock.release()
+            self.conn_lock.release()
 
         # crontab-like schedule definitions for updating expiries and emailing the access_list
         now = datetime.now()
@@ -124,7 +121,7 @@ class ClaimTable(pygsheets.Spreadsheet):
             defaults = {
                     "ColumnOrder": ";".join(self.column_order),
                     "AccessList": [""],
-                    "UpdateSched": ["* * 31 1 1"], 
+                    "UpdateSched": ["* * 31 1 1"],
                     "EmailSched": ["* * 31 1 1"],
                     "Prune": ["0"],
                     "Compact": ["0"],
@@ -142,19 +139,19 @@ class ClaimTable(pygsheets.Spreadsheet):
             values_placeholders = [f":{c}" for c in cols]
             values_sql = ", ".join(values_placeholders)
             sql = f"""
-                REPLACE INTO {table.name} ({cols_sql}) 
+                REPLACE INTO {table.name} ({cols_sql})
                 VALUES ({values_sql})
             """
             params = []
             for row in data_iter:
                 param_dict = dict(zip(keys, row))
-                param_dict["id"] = 1 
+                param_dict["id"] = 1
                 params.append(param_dict)
-                break 
+                break
             conn.execute(text(sql), params)
 
         if not df.empty:
-            conn_lock.acquire()
+            self.conn_lock.acquire()
             try:
                 with self.engine.connect() as conn:
                     df.to_sql(self.title + self.suffix["config"], conn, index=False, if_exists="append",
@@ -163,7 +160,7 @@ class ClaimTable(pygsheets.Spreadsheet):
                 logging.error("Unable to write configuration to table <%s>", self.title + self.suffix["config"])
                 logging.error(e)
             finally:
-                conn_lock.release()
+                self.conn_lock.release()
 
     def update_config(self, table_properties):
         self.config_df = pd.DataFrame(table_properties)
@@ -184,8 +181,8 @@ class ClaimTable(pygsheets.Spreadsheet):
                     "CREATE TABLE " + self.title + self.suffix["config"] + " LIKE _Config_Template;" + \
                     "ALTER TABLE " + self.title + self.suffix["config"] + " AUTO_INCREMENT = 1"
         query = query.split(";")
-        
-        conn_lock.acquire()
+
+        self.conn_lock.acquire()
         try:
             with self.engine.begin() as conn:
                 for q in query:
@@ -197,7 +194,7 @@ class ClaimTable(pygsheets.Spreadsheet):
             logging.error("Unable to create new table <%s>", self.title)
             logging.error(e)
         finally:
-            conn_lock.release()
+            self.conn_lock.release()
 
         if not success:
             return
@@ -220,7 +217,7 @@ class ClaimTable(pygsheets.Spreadsheet):
                 "ALTER TABLE " + self.title + self.suffix["config"] + " RENAME TO " + new_title_config
         query = query.split(";")
 
-        conn_lock.acquire()
+        self.conn_lock.acquire()
         try:
             with self.engine.begin() as conn:
                 for q in query:
@@ -230,10 +227,10 @@ class ClaimTable(pygsheets.Spreadsheet):
             logging.error(e)
             return
         finally:
-            conn_lock.release()
+            self.conn_lock.release()
 
         if self.compact_wks is not None:
-            conn_lock.acquire()
+            self.conn_lock.acquire()
             query = "ALTER TABLE " + self.title + self.suffix["compact"] + " RENAME TO " + new_title_compact
             try:
                 with self.engine.begin() as conn:
@@ -243,7 +240,7 @@ class ClaimTable(pygsheets.Spreadsheet):
                 logging.error(e)
                 return
             finally:
-                conn_lock.release()
+                self.conn_lock.release()
 
         self.title = new_title
 
@@ -256,7 +253,7 @@ class ClaimTable(pygsheets.Spreadsheet):
                 "DROP TABLE IF EXISTS " + self.title + self.suffix["compact"]
         query = query.split(";")
 
-        conn_lock.acquire()
+        self.conn_lock.acquire()
         try:
             with self.engine.begin() as conn:
                 for q in query:
@@ -265,7 +262,7 @@ class ClaimTable(pygsheets.Spreadsheet):
             logging.error("Unable to drop table <%s>", self.title)
             logging.error(e)
         finally:
-            conn_lock.release()
+            self.conn_lock.release()
 
         self.delete()
 
@@ -293,7 +290,7 @@ class ClaimTable(pygsheets.Spreadsheet):
             inTable.jurisdictionCol = "Jurisdiction"
 
         rows = []
-        conn_lock.acquire()
+        self.conn_lock.acquire()
         try:
             with self.engine.connect() as conn:
                 if not RegTitleNumber:
@@ -308,7 +305,7 @@ class ClaimTable(pygsheets.Spreadsheet):
             logging.error("Error retrieving tenure data from table <%s>", self.title)
             logging.error(e)
         finally:
-            conn_lock.release()
+            self.conn_lock.release()
 
         # if the list is empty, do not pass go
         if not rows:
@@ -339,10 +336,10 @@ class ClaimTable(pygsheets.Spreadsheet):
             t["UpdateDate"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             df = pd.DataFrame([t])
 
-            conn_lock.acquire()
+            self.conn_lock.acquire()
             try:
                 with self.engine.connect() as conn:
-                   if self.prune:
+                    if self.prune:
                         for index, row in df.iterrows():
                             if row["NextDueDate"] < datetime.now():
                                 logging.debug("Drop parcel <%s> where NextDueDate < datetime.now", \
@@ -350,13 +347,13 @@ class ClaimTable(pygsheets.Spreadsheet):
                                 conn.execute(text("DELETE FROM " + self.title + " WHERE RegTitleNumber=\"" + \
                                              row["RegTitleNumber"] + "\""))
                                 df = df.drop(index)
-                   if not df.empty:
-                       df.to_sql(self.title, conn, index=False, if_exists="append", method=mysql_replace_into)
+                    if not df.empty:
+                        df.to_sql(self.title, conn, index=False, if_exists="append", method=mysql_replace_into)
             except exc.SQLAlchemyError as e:
                 logging.error("Error updating expiry dates for table <%s>", self.title)
                 logging.error(e)
             finally:
-                conn_lock.release()
+                self.conn_lock.release()
 
     def modify_parcel(self, df_before, df_after):
         """ modify a row in the claimtable """
@@ -380,7 +377,7 @@ class ClaimTable(pygsheets.Spreadsheet):
         """ pulls the current SQL table and pushes the whole thing to GSheets in one call """
         df = pd.DataFrame()
 
-        conn_lock.acquire()
+        self.conn_lock.acquire()
         try:
             with self.engine.connect() as conn:
                 query = "SELECT * FROM " + self.title
@@ -390,7 +387,7 @@ class ClaimTable(pygsheets.Spreadsheet):
             logging.error(e)
             return
         finally:
-            conn_lock.release()
+            self.conn_lock.release()
 
         if not df.empty:
             df = df[self.column_order + [c for c in df.columns if c not in self.column_order]]
@@ -400,7 +397,7 @@ class ClaimTable(pygsheets.Spreadsheet):
         """ update expiry dates, load MySQL table into ClaimTable object, run compaction, link with cloud """
         df = pd.DataFrame()
         # load MySQL table into first worksheet
-        conn_lock.acquire()
+        self.conn_lock.acquire()
         try:
             with self.engine.connect() as conn:
                 query = "SELECT * FROM " + self.title
@@ -410,7 +407,7 @@ class ClaimTable(pygsheets.Spreadsheet):
             logging.critical(e)
             sys.exit(1)
         finally:
-            conn_lock.release()
+            self.conn_lock.release()
 
         # re-order columns
         df = df[self.column_order + [c for c in df.columns if c not in self.column_order]]
@@ -434,7 +431,7 @@ class ClaimTable(pygsheets.Spreadsheet):
                 query = query.replace("<!TableName>", self.title)
                 query = query.replace("<!Suffix>", self.suffix["compact"])
 
-            conn_lock.acquire()
+            self.conn_lock.acquire()
             try:
                 with self.engine.connect() as conn:
                     conn.execute(text("DROP TABLE IF EXISTS " + self.title + self.suffix["compact"]))
@@ -446,7 +443,7 @@ class ClaimTable(pygsheets.Spreadsheet):
                 logging.error("Unable to generate table compaction for <%s>", self.title)
                 logging.error(e)
             finally:
-                conn_lock.release()
+                self.conn_lock.release()
 
             # drop and re-order google sheet
             try:

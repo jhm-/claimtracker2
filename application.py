@@ -23,7 +23,7 @@ import urllib
 import sqlalchemy
 from sqlalchemy import text, exc
 import pygsheets
-from claimtable import ClaimTable, TableDefinition, claimtables, conn_lock
+from claimtable import ClaimTable, TableDefinition, claimtables
 from flask import Flask, render_template, request, redirect, url_for, jsonify
 from flask_wtf.csrf import CSRFProtect, generate_csrf
 from threading import Thread
@@ -35,7 +35,7 @@ app = Flask(__name__)
 app.config["SECRET_KEY"] = "claimtracker"
 csrf = CSRFProtect(app)
 
-version = "0.4.0"
+version = "0.4.2"
 config_path = "claimtracker.conf"
 
 class DbDefinition:
@@ -176,6 +176,22 @@ def index(table_name=None):
                            selected_url=selected_url, property_values=selected_properties, \
                            csrf_token=generate_csrf())
 
+def is_valid_column_order(column_order_string, table_name):
+    """ validates that all columns in a semicolon-delimited string exist in the SQL table """
+    try:
+        columns = [c.strip() for c in column_order_string.split(";") if c.strip()]
+        if len(columns) < 2:
+            return False, "column order must have at least 2 columns"
+        with db_engine.connect() as conn:
+            result = conn.execute(text("SHOW COLUMNS FROM " + table_name))
+            valid_columns = {row[0] for row in result}
+        invalid = [c for c in columns if c not in valid_columns]
+        if invalid:
+            return False, "unknown column(s): " + ", ".join(invalid)
+        return True, None
+    except Exception as e:
+        return False, str(e)
+
 def is_valid_cron(cron_string):
     """ validates a 5-field cron string, including impossible dates """
     try:
@@ -198,6 +214,21 @@ def update_properties():
         if not valid:
             logging.warning("Invalid %s schedule attempted: %s", label, sched)
             return jsonify({"success": False, "error": error})
+
+    # validate column orders against the actual SQL table
+    valid, error = is_valid_column_order(data.get("ColumnOrder"), table_name)
+    if not valid:
+        logging.warning("Invalid ColumnOrder for <%s>: %s", table_name, error)
+        return jsonify({"success": False, "error": "Invalid ColumnOrder — " + error})
+
+    # validate compact column order only if compaction is enabled
+    compact_order = data.get("CompactColumnOrder")
+    compact_table = table_name + suffix["compact"]
+    if data.get("Compact") == "True":
+        valid, error = is_valid_column_order(compact_order, compact_table)
+        if not valid:
+            logging.warning("Invalid CompactColumnOrder for <%s>: %s", table_name, error)
+            return jsonify({"success": False, "error": "Invalid CompactColumnOrder — " + error})
 
     new_properties = {
         "ColumnOrder": [data.get("ColumnOrder")],
@@ -330,6 +361,7 @@ atexit.register(cleanup_on_exit)
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-H", "--host", help="specify the host address", default="127.0.0.1")
+    parser.add_port("-p", "--port", help="specify the port", default=5001, type=int)
     args = parser.parse_args()
 
     configuration.load(config_path)
@@ -348,9 +380,7 @@ if __name__ == "__main__":
         db_engine = sqlalchemy.create_engine(db.connection_string(), pool_pre_ping=True, pool_recycle=3600, \
                                              connect_args={"timeout": 10})
         with db_engine.connect() as conn:
-            conn_lock.acquire()
             tables_raw = conn.execute(text("SHOW TABLES"))
-            conn_lock.release()
             if  tables_raw is None:
                 logging.info("No tables in database!")
                 # TODO: we have to exit here, because creating a new table requires _Parcels_Template
@@ -425,6 +455,6 @@ if __name__ == "__main__":
     scheduler.start()
 
     try:
-        app.run(host=args.host)
+        app.run(host=args.host, port=args.port)
     except (KeyboardInterrupt, SystemExit):
         pass
