@@ -361,7 +361,7 @@ atexit.register(cleanup_on_exit)
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-H", "--host", help="specify the host address", default="127.0.0.1")
-    parser.add_port("-p", "--port", help="specify the port", default=5001, type=int)
+    parser.add_argument("-P", "--port", help="specify the port", default=5001, type=int)
     args = parser.parse_args()
 
     configuration.load(config_path)
