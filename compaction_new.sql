@@ -1,12 +1,11 @@
 -- <!TableName> and <!Suffix> are replaced at runtime
-
 CREATE TABLE <!TableName><!Suffix> AS
 WITH PreparedData AS (
     SELECT *,
         REGEXP_SUBSTR(RegTitleNumber, '^[A-Za-z]+') AS TitlePrefix,
-        CAST(REGEXP_SUBSTR(RegTitleNumber, '[0-9]+$') AS UNSIGNED) AS TitleNum,
-        SUBSTRING_INDEX(ParcelName, ' ', 1) AS ParcelPrefix,
-        CAST(SUBSTRING_INDEX(ParcelName, ' ', -1) AS UNSIGNED) AS ParcelNum
+        CAST(NULLIF(REGEXP_SUBSTR(RegTitleNumber, '[0-9]+$'), '') AS UNSIGNED) AS TitleNum,
+        SUBSTRING_INDEX(COALESCE(ParcelName, ''), ' ', 1) AS ParcelPrefix,
+        CAST(NULLIF(REGEXP_SUBSTR(COALESCE(ParcelName, ''), '[0-9]+$'), '') AS UNSIGNED) AS ParcelNum
     FROM <!TableName>
 ),
 SequencedData AS (
@@ -30,8 +29,14 @@ GroupedData AS (
 SELECT
     ProjectName,
     Jurisdiction,
-    CONCAT(ParcelPrefix, ' ', MIN(ParcelNum)) AS ParcelNameFrom,
-    NULLIF(CONCAT(ParcelPrefix, ' ', MAX(ParcelNum)), CONCAT(ParcelPrefix, ' ', MIN(ParcelNum))) AS ParcelNameTo,
+    CASE
+        WHEN MIN(ParcelNum) IS NULL THEN MIN(RegTitleNumber)
+        ELSE CONCAT(ParcelPrefix, ' ', MIN(ParcelNum))
+    END AS ParcelNameFrom,
+    CASE
+        WHEN MAX(ParcelNum) IS NULL THEN NULL
+        ELSE NULLIF(CONCAT(ParcelPrefix, ' ', MAX(ParcelNum)), CONCAT(ParcelPrefix, ' ', MIN(ParcelNum)))
+    END AS ParcelNameTo,
     CONCAT(TitlePrefix, MIN(TitleNum)) AS RegTitleFrom,
     NULLIF(CONCAT(TitlePrefix, MAX(TitleNum)), CONCAT(TitlePrefix, MIN(TitleNum))) AS RegTitleTo,
     (MAX(TitleNum) - MIN(TitleNum)) AS TitleNumberDistance,

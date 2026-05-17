@@ -17,9 +17,8 @@ import logging
 import pygsheets
 import pandas as pd
 import sys
-import time
 from cron_converter import Cron
-from sqlalchemy import func, text, exc
+from sqlalchemy import text, exc
 from sqlalchemy.dialects.mysql import insert
 from threading import Lock
 import arcweb_data
@@ -95,12 +94,12 @@ class ClaimTable(pygsheets.Spreadsheet):
                     logging.warning("ColumnOrder for <%s> has fewer than 2 columns, check configuration", self.title)
                 compact_order = df["CompactColumnOrder"].iloc[0]
                 self.compact_order = [c.strip() for c in compact_order.split(";")]
+                self.compact = df["Compact"].iloc[0]
                 if self.compact and len(self.compact_order) < 2:
                     logging.warning("CompactColumnOrder for <%s> has fewer than 2 columns, check configuration", \
                                     self.title)
-                # pruning (remove expired claims) and compactions flags
+                # pruning (remove expired claims)
                 self.prune = df["Prune"].iloc[0]
-                self.compact = df["Compact"].iloc[0]
                 # google sheet access list (emails)
                 access_list = df["AccessList"].iloc[0]
                 self.access_list = [r.strip() for r in access_list.split(";")]
@@ -298,12 +297,13 @@ class ClaimTable(pygsheets.Spreadsheet):
         try:
             with self.engine.connect() as conn:
                 if not RegTitleNumber:
-                    rows = conn.execute(text("SELECT " + inTable.keyCol + ", ProjectName, Comments FROM " + inTable.name + \
+                    result = conn.execute(text("SELECT " + inTable.keyCol + ", ProjectName, Comments FROM " + inTable.name + \
                         " WHERE " + inTable.jurisdictionCol + "=\"" + jurisdiction + "\""))
                 else:
-                    rows = conn.execute(text("SELECT " + inTable.keyCol + ", ProjectName, Comments FROM " + inTable.name + \
+                    result = conn.execute(text("SELECT " + inTable.keyCol + ", ProjectName, Comments FROM " + inTable.name + \
                         " WHERE " + inTable.jurisdictionCol + "=\"" + jurisdiction + "\" AND RegTitleNumber=\"" + \
                         str(RegTitleNumber) + "\""))
+                rows = result.fetchall()
         except exc.SQLAlchemyError as e:
             logging.error("Error retrieving tenure data from table <%s>", self.title)
             logging.error(e)
@@ -350,8 +350,8 @@ class ClaimTable(pygsheets.Spreadsheet):
                                 conn.execute(text("DELETE FROM " + self.title + " WHERE RegTitleNumber=\"" + \
                                              row["RegTitleNumber"] + "\""))
                                 df = df.drop(index)
-                    if not df.empty:
-                        df.to_sql(self.title, conn, index=False, if_exists="append", method=mysql_replace_into)
+                   if not df.empty:
+                       df.to_sql(self.title, conn, index=False, if_exists="append", method=mysql_replace_into)
             except exc.SQLAlchemyError as e:
                 logging.error("Error updating expiry dates for table <%s>", self.title)
                 logging.error(e)

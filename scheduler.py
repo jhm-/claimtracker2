@@ -137,19 +137,11 @@ class Scheduler(threading.Thread):
 
                 # retrieve one event per iteration
                 try:
-                    binlogevent = next(self.stream)
-                except StopIteration:
-                    binlogevent = None
+                    binlogevent = self.stream.fetchone()
                 except Exception as e:
-                    # if it blocks here, fall back to fetchone()
-                    logging.warning("BinLog steam read failed, falling back to fetchone()")
-                    logging.warning(e)
-                    try:
-                        binlogevent = self.stream.fetchone()
-                    except Exception as e:
-                        logging.error("BingLog stream fetchone() also failed - skipping event")
-                        logging.error(e)
-                        binlogevent = None
+                    logging.error("BingLog stream fetchone() failed - skipping event")
+                    logging.error(e)
+                    binlogevent = None
 
                 if binlogevent:
                     t_name = binlogevent.table
