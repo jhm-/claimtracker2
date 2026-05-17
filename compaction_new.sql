@@ -37,8 +37,14 @@ SELECT
         WHEN MAX(ParcelNum) IS NULL THEN NULL
         ELSE NULLIF(CONCAT(ParcelPrefix, ' ', MAX(ParcelNum)), CONCAT(ParcelPrefix, ' ', MIN(ParcelNum)))
     END AS ParcelNameTo,
-    CONCAT(TitlePrefix, MIN(TitleNum)) AS RegTitleFrom,
-    NULLIF(CONCAT(TitlePrefix, MAX(TitleNum)), CONCAT(TitlePrefix, MIN(TitleNum))) AS RegTitleTo,
+    CASE
+        WHEN TitlePrefix IS NULL THEN CAST(MIN(TitleNum) AS CHAR)
+        ELSE CONCAT(TitlePrefix, MIN(TitleNum))
+    END AS RegTitleFrom,
+    CASE
+        WHEN TitlePrefix IS NULL THEN NULLIF(CAST(MAX(TitleNum) AS CHAR), CAST(MIN(TitleNum) AS CHAR))
+        ELSE NULLIF(CONCAT(TitlePrefix, MAX(TitleNum)), CONCAT(TitlePrefix, MIN(TitleNum)))
+    END AS RegTitleTo,
     (MAX(TitleNum) - MIN(TitleNum)) AS TitleNumberDistance,
     ANY_VALUE(Owner) AS Owner,
     MIN(RegDate) AS RegDate,
